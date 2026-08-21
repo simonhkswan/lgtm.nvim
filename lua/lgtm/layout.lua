@@ -184,7 +184,11 @@ local function split_path(path, budget)
     return dir, name
 end
 
-function M.setup_winbar_highlights()
+--- @param diff_colors table|false|nil the configured diff_colors, so the AI
+---        header colours are positioned against the real background like every
+---        other tint here
+function M.setup_winbar_highlights(diff_colors)
+    local opts = type(diff_colors) == "table" and diff_colors or {}
     -- No background: a statusline highlight with one would read as a bar again,
     -- which is the thing being removed.
     vim.api.nvim_set_hl(0, "LgtmDivider", { link = "NonText" })
@@ -193,8 +197,12 @@ function M.setup_winbar_highlights()
     vim.api.nvim_set_hl(0, "LgtmWinbarName", { bold = true })
     vim.api.nvim_set_hl(0, "LgtmWinbarBadge", { link = "WarningMsg" })
     -- The headers of the AI-generated panes — the stream picker and the
-    -- explanation column — so generated content is labelled at a glance.
-    vim.api.nvim_set_hl(0, "LgtmWinbarAI", { link = "Special" })
+    -- explanation column — so generated content is labelled at a glance. The
+    -- label sits in the plugin's own cyan family (the code-chip foreground);
+    -- the ✦ takes a magenta nothing else here uses, so the mark is the one
+    -- deliberately playful colour in the layout.
+    vim.api.nvim_set_hl(0, "LgtmWinbarAI", { fg = colors.fg(193, 0.5, opts), bold = true })
+    vim.api.nvim_set_hl(0, "LgtmWinbarAIIcon", { fg = colors.fg(300, 0.6, opts) })
 end
 
 --- Show one file's before/after pair.

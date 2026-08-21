@@ -287,7 +287,7 @@ local function open_feature_picker()
     vim.wo[win].colorcolumn = ""
     -- The pane's content is AI-generated; the ✦ header says so at a glance, the
     -- same mark the explanation column carries.
-    vim.wo[win].winbar = "%#LgtmWinbarAI# ✦ STREAMS"
+    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# ✦ %#LgtmWinbarAI#STREAMS"
     vim.api.nvim_set_current_win(prev)
 
     -- The session's paging and toggle keys, plus the picker's own selection.
@@ -686,7 +686,7 @@ function M.open(base_arg, opts)
     end
 
     tree.setup_highlights(cfg.diff_colors)
-    layout.setup_winbar_highlights()
+    layout.setup_winbar_highlights(cfg.diff_colors)
     ruler.setup_highlights(cfg.diff_colors)
     markdown.setup_highlights(cfg.diff_colors)
     explain.setup_highlights(cfg.diff_colors)
