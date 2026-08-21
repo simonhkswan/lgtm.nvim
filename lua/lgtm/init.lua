@@ -218,6 +218,97 @@ local function render_desc()
     end
 end
 
+local function feature_picker_open()
+    return session ~= nil
+        and session.feature_win ~= nil
+        and vim.api.nvim_win_is_valid(session.feature_win)
+end
+
+--- Redraw the stream picker and size its window to its content, so the tree
+--- below keeps every remaining row.
+local function redraw_features()
+    if not (session_valid() and feature_picker_open()) then
+        return
+    end
+    local rows = feature_rows()
+    if not rows then
+        return
+    end
+    session.feature_map = tree.render_features(session.feature_buf, {
+        features = rows,
+        selected = session.feature,
+        width = session.cfg.tree_width,
+    })
+    local content = vim.api.nvim_buf_line_count(session.feature_buf)
+    local column = vim.api.nvim_win_get_height(session.feature_win) + vim.api.nvim_win_get_height(session.tree_win)
+    pcall(vim.api.nvim_win_set_height, session.feature_win, math.min(content, math.floor(column / 2)))
+end
+
+local function close_feature_picker()
+    if session and session.feature_win and vim.api.nvim_win_is_valid(session.feature_win) then
+        pcall(vim.api.nvim_win_close, session.feature_win, true)
+    end
+    if session then
+        session.feature_win, session.feature_buf, session.feature_map = nil, nil, nil
+    end
+end
+
+--- The picker's own window, between the description and the tree. Created with
+--- the AI comments column and only once a guide exists; both leave together.
+local function open_feature_picker()
+    if not session_valid() or feature_picker_open() or not session.guide then
+        return
+    end
+    if not vim.api.nvim_win_is_valid(session.tree_win) then
+        return
+    end
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].buftype = "nofile"
+    vim.bo[buf].bufhidden = "wipe"
+    vim.bo[buf].swapfile = false
+    pcall(vim.api.nvim_buf_set_name, buf, "lgtm://streams")
+    vim.bo[buf].filetype = "lgtm-streams"
+
+    local prev = vim.api.nvim_get_current_win()
+    local win
+    vim.api.nvim_win_call(session.tree_win, function()
+        vim.cmd("leftabove split")
+        win = vim.api.nvim_get_current_win()
+    end)
+    vim.api.nvim_win_set_buf(win, buf)
+    vim.wo[win].number = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].wrap = false
+    vim.wo[win].signcolumn = "no"
+    vim.wo[win].cursorline = true
+    vim.wo[win].winfixwidth = true
+    vim.wo[win].winfixheight = true
+    vim.wo[win].colorcolumn = ""
+    -- The pane's content is AI-generated; the ✦ header says so at a glance, the
+    -- same mark the explanation column carries.
+    vim.wo[win].winbar = "%#LgtmWinbarAI# ✦ STREAMS"
+    vim.api.nvim_set_current_win(prev)
+
+    -- The session's paging and toggle keys, plus the picker's own selection.
+    -- Selection goes through the M table so it resolves at press time; the
+    -- function itself is defined further down the file.
+    apply_keys(buf, false)
+    vim.keymap.set("n", "<CR>", function()
+        local line = vim.api.nvim_win_get_cursor(win)[1]
+        local item = session and session.feature_map and session.feature_map[line]
+        if item then
+            M._select_feature(item.index ~= 0 and item.index or nil)
+        end
+    end, { buffer = buf, nowait = true, silent = true, desc = "lgtm: select stream" })
+    vim.keymap.set("n", "q", function()
+        M.close()
+    end, { buffer = buf, nowait = true, silent = true, desc = "lgtm: close session" })
+
+    session.feature_win, session.feature_buf = win, buf
+    redraw_features()
+end
+
 local function redraw_tree()
     if not session_valid() then
         return
@@ -230,8 +321,6 @@ local function redraw_tree()
         folded = session.folded,
         header = session.base_ref,
         width = session.cfg.tree_width,
-        features = feature_rows(),
-        selected_feature = session.feature,
     })
     -- Park the tree cursor on the current file so the highlight and the cursor
     -- agree with each other.
@@ -243,6 +332,8 @@ local function redraw_tree()
             break
         end
     end
+    -- The picker's viewed stats move with the tree's, so the two redraw as one.
+    redraw_features()
 end
 
 local function goto_index(idx, focus_working)
@@ -421,10 +512,9 @@ local function toggle_explain(force)
         -- The stream picker leaves with the comments. Dropping a live filter
         -- goes through select_feature so the tree, paging and the description
         -- pane all return to the whole PR together.
+        close_feature_picker()
         if session.feature then
             select_feature(nil)
-        else
-            redraw_tree()
         end
         ruler.update(session)
         return
@@ -434,7 +524,7 @@ local function toggle_explain(force)
     end
     apply_keys(session.explain_buf, false)
     ruler.update(session)
-    redraw_tree()
+    open_feature_picker()
     explain.refresh(session, { force = force })
 end
 
@@ -451,16 +541,6 @@ end
 local function tree_open()
     local item = tree_cursor_item()
     if not item then
-        return
-    end
-    if item.kind == "feature" then
-        -- The redraw parks the tree cursor on the current file; put it back on
-        -- the picker so streams can be flicked through without re-climbing.
-        local line = vim.api.nvim_win_get_cursor(session.tree_win)[1]
-        select_feature(item.index ~= 0 and item.index or nil)
-        if session_valid() and vim.api.nvim_win_is_valid(session.tree_win) then
-            pcall(vim.api.nvim_win_set_cursor, session.tree_win, { line, 0 })
-        end
         return
     end
     if item.kind == "dir" then
@@ -516,6 +596,7 @@ local function close_session(force)
     -- the window or block the tabclose.
     ruler.close(session)
     explain.close(session)
+    close_feature_picker()
     layout.close(session)
     session = nil
 end
@@ -641,11 +722,21 @@ function M.open(base_arg, opts)
         if not session_valid() then
             return
         end
+        -- The store was cleared: the picker goes, and a live filter with it.
+        if not session.guide then
+            close_feature_picker()
+            if session.feature then
+                select_feature(nil)
+            end
+            return
+        end
+        if explain.is_open(session) then
+            open_feature_picker()
+        end
         if session.feature then
             -- A refined guide may have regrouped or dropped the selected stream;
             -- reselect so the filter follows it rather than going stale.
-            local n = session.guide and #session.guide.features or 0
-            select_feature(session.feature <= n and session.feature or nil)
+            select_feature(session.feature <= #session.guide.features and session.feature or nil)
         else
             redraw_tree()
         end

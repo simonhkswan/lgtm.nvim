@@ -192,6 +192,9 @@ function M.setup_winbar_highlights()
     vim.api.nvim_set_hl(0, "LgtmWinbarDim", { link = "Comment" })
     vim.api.nvim_set_hl(0, "LgtmWinbarName", { bold = true })
     vim.api.nvim_set_hl(0, "LgtmWinbarBadge", { link = "WarningMsg" })
+    -- The headers of the AI-generated panes — the stream picker and the
+    -- explanation column — so generated content is labelled at a glance.
+    vim.api.nvim_set_hl(0, "LgtmWinbarAI", { link = "Special" })
 end
 
 --- Show one file's before/after pair.

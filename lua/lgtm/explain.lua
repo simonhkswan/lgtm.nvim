@@ -485,7 +485,9 @@ local function set_winbar(session, entry, note)
     end
     local name = entry and entry.path or ""
     local text = table.concat({
-        "%#LgtmWinbarLabel# EXPLAIN  %#LgtmWinbarDim#",
+        -- ✦ in the AI colour: this pane's content is generated, and the same
+        -- mark sits on the stream picker.
+        "%#LgtmWinbarAI# ✦ EXPLAIN  %#LgtmWinbarDim#",
         (name:gsub("%%", "%%%%")),
         "  %=",
         (note or ""):gsub("%%", "%%%%"),

@@ -107,12 +107,82 @@ function M.display_order(entries)
     return out
 end
 
+--- Render the stream picker into its own buffer: "All files", then one block per
+--- stream of the reviewer guide, each priced with the change it actually covers.
+--- @param opts table { features, selected, width } — `features` rows are
+---        { title, files, added, deleted, viewed }; `selected` is nil while every
+---        file is shown.
+--- @return table line -> { kind = "feature", index } map (index 0 is All files)
+function M.render_features(buf, opts)
+    local width = opts.width or 40
+    local lines, marks, line_map = {}, {}, {}
+
+    local function feature_row(idx, title, stats, selected)
+        local marker = selected and ICONS.current or ICONS.unviewed
+        local head = string.format(" %s ", marker)
+        local room = width - vim.fn.strdisplaywidth(head) - 1
+        if room >= 8 and vim.fn.strdisplaywidth(title) > room then
+            title = title:sub(1, math.max(1, room - 1)) .. "…"
+        end
+        local text = head .. title
+        table.insert(lines, text)
+        local row = #lines - 1
+        line_map[#lines] = { kind = "feature", index = idx }
+        table.insert(marks, {
+            line = row,
+            col = 1,
+            end_col = 1 + #marker,
+            hl = selected and "LgtmCurrent" or "Comment",
+        })
+        table.insert(marks, {
+            line = row,
+            col = #head,
+            end_col = #text,
+            hl = selected and "LgtmCurrentName" or "Normal",
+        })
+        if selected then
+            table.insert(marks, { line = row, line_hl = "LgtmCurrentLine" })
+        end
+        if stats then
+            local text2 = "     " .. stats
+            table.insert(lines, text2)
+            line_map[#lines] = { kind = "feature", index = idx }
+            table.insert(marks, { line = #lines - 1, col = 0, end_col = #text2, hl = "Comment" })
+        end
+    end
+
+    feature_row(0, "All files", nil, opts.selected == nil)
+    for i, f in ipairs(opts.features or {}) do
+        feature_row(
+            i,
+            f.title,
+            string.format("%d/%d viewed  ·  +%d −%d", f.viewed, f.files, f.added, f.deleted),
+            opts.selected == i
+        )
+    end
+
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+
+    vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+    for _, m in ipairs(marks) do
+        if m.line_hl then
+            vim.api.nvim_buf_set_extmark(buf, NS, m.line, 0, { line_hl_group = m.line_hl })
+        else
+            pcall(vim.api.nvim_buf_set_extmark, buf, NS, m.line, m.col, {
+                end_col = m.end_col,
+                hl_group = m.hl,
+            })
+        end
+    end
+
+    return line_map
+end
+
 --- Render the tree into `buf`, returning the line -> entry map used for
 --- navigation and cursor tracking.
---- @param opts table { entries, store, current_path, folded, header,
----        features, selected_feature } — `features` is the stream picker's rows,
----        each { title, files, added, deleted, viewed }; `selected_feature` is
----        nil while every file is shown.
+--- @param opts table { entries, store, current_path, folded, header }
 function M.render(buf, opts)
     local entries, store = opts.entries, opts.store
     local folded = opts.folded or {}
@@ -152,56 +222,6 @@ function M.render(buf, opts)
     table.insert(marks, { line = 1, col = 0, end_col = #lines[2], hl = "Comment" })
     table.insert(lines, "")
 
-    -- The stream picker: the guide's streams of work, each filtering the tree
-    -- below to its own files. Only there once a guide exists — before the first
-    -- explanation run the session looks exactly as it always did.
-    if opts.features and #opts.features > 0 then
-        local width = opts.width or 40
-        local function feature_row(idx, title, stats, selected)
-            local marker = selected and ICONS.current or ICONS.unviewed
-            local head = string.format(" %s ", marker)
-            local room = width - vim.fn.strdisplaywidth(head) - 1
-            if room >= 8 and vim.fn.strdisplaywidth(title) > room then
-                title = title:sub(1, math.max(1, room - 1)) .. "…"
-            end
-            local text = head .. title
-            table.insert(lines, text)
-            local row = #lines - 1
-            line_map[#lines] = { kind = "feature", index = idx }
-            table.insert(marks, {
-                line = row,
-                col = 1,
-                end_col = 1 + #marker,
-                hl = selected and "LgtmCurrent" or "Comment",
-            })
-            table.insert(marks, {
-                line = row,
-                col = #head,
-                end_col = #text,
-                hl = selected and "LgtmCurrentName" or "Normal",
-            })
-            if selected then
-                table.insert(marks, { line = row, line_hl = "LgtmCurrentLine" })
-            end
-            if stats then
-                local text2 = "     " .. stats
-                table.insert(lines, text2)
-                line_map[#lines] = { kind = "feature", index = idx }
-                table.insert(marks, { line = #lines - 1, col = 0, end_col = #text2, hl = "Comment" })
-            end
-        end
-
-        feature_row(0, "All files", nil, opts.selected_feature == nil)
-        for i, f in ipairs(opts.features) do
-            feature_row(
-                i,
-                f.title,
-                string.format("%d/%d viewed  ·  +%d −%d", f.viewed, f.files, f.added, f.deleted),
-                opts.selected_feature == i
-            )
-        end
-        table.insert(lines, "")
-    end
 
     --- Break a collapsed chain like "a/b/c/d" into lines that fit, splitting on
     --- the separators. Eliding to "…/c/d" throws away the outer directories,

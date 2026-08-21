@@ -129,17 +129,22 @@ model call per file.
 
 The same run also writes a reviewer guide: the PR split into its streams of
 work, each with a one-line title, a summary, and the files it touches. Once it
-lands, a stream picker appears above the file tree. The picker comes and goes
-with the comments column — one `<leader>ge` toggles the pair, and toggling off
-drops any stream filter back to all files:
+lands, a stream picker opens as its own pane between the PR description and the
+file tree. The picker comes and goes with the comments column — one
+`<leader>ge` toggles the pair, and toggling off drops any stream filter back to
+all files:
 
 ```
+│ ✦ STREAMS                            │
 │ ● All files                          │
 │   Cross-editor IMG. N allocation     │
 │     0/4 viewed  ·  +435 −0           │
 │   E2E coverage for inline images     │
 │     2/3 viewed  ·  +118 −6           │
 ```
+
+Both AI panes — the picker and the comments column — carry a `✦` header, so
+generated content is labelled at a glance.
 
 `<CR>` on a stream narrows the file tree — and paging, and the viewed-advance —
 to that stream's files, and the description pane swaps to the stream's summary.
