@@ -484,13 +484,26 @@ local function set_winbar(session, entry, note)
         return
     end
     local name = entry and entry.path or ""
+    note = note or ""
+    -- Budget the path against the pane, the same way layout.bar does. Neovim
+    -- truncates an over-long winbar from the LEFT, so without this a long path
+    -- pushes the sparkle and the EXPLAIN label off the edge and the bar reads
+    -- as a bare filename. Elide the path from its own left instead: the
+    -- deepest directories and the filename are the informative end.
+    local w = vim.fn.strdisplaywidth
+    local avail = vim.api.nvim_win_get_width(session.explain_win)
+    local fixed = w(" 󰙴 EXPLAIN  ") + (note ~= "" and (w(note) + 3) or 1)
+    local room = math.max(8, avail - fixed)
+    if w(name) > room then
+        name = "…" .. name:sub(-(room - 1))
+    end
     local text = table.concat({
-        -- Robot-and-sparkle, then the label in the magenta wash: this pane's
-        -- content is generated, and the same mark sits on the stream picker.
+        -- The sparkle, then the label in the magenta wash: this pane's content
+        -- is generated, and the same mark sits on the stream picker.
         "%#LgtmWinbarAIIcon# 󰙴 " .. require("lgtm.layout").ai_label("EXPLAIN") .. "  %#LgtmWinbarDim#",
         (name:gsub("%%", "%%%%")),
         "  %=",
-        (note or ""):gsub("%%", "%%%%"),
+        (note:gsub("%%", "%%%%")),
         " ",
     })
     vim.wo[session.explain_win].winbar = text
