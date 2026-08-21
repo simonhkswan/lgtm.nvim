@@ -25,8 +25,8 @@ local defaults = {
     -- the rest.
     desc_height = 0.45,
     -- Fixed width for the read-only base pane; the working pane takes whatever
-    -- is left. Set to nil to split the remainder evenly instead.
-    base_width = 104,
+    -- is left. Left nil, the remainder is split evenly between the two panes.
+    base_width = nil,
     -- Use a single global statusline for the duration of the session. With
     -- per-window statuslines the description/tree split draws a status bar
     -- across the middle of the layout. Restored when the session closes.

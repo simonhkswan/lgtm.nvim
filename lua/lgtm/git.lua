@@ -351,10 +351,14 @@ function M.changed_files(merge_base, cwd, opts)
         for _, path in ipairs(nul_fields(untracked)) do
             local e = entry(path)
             e.status = "U"
+            -- pcall: an unreadable untracked path (a broken symlink, say) must
+            -- not take the whole session down with it.
             local lines = 0
-            for _ in io.lines((cwd or ".") .. "/" .. path) do
-                lines = lines + 1
-            end
+            pcall(function()
+                for _ in io.lines((cwd or ".") .. "/" .. path) do
+                    lines = lines + 1
+                end
+            end)
             e.added = lines
         end
     end
