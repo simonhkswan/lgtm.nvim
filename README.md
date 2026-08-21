@@ -73,6 +73,8 @@ pass one explicitly: `:LgtmEdit origin/release-2`.
 |---|---|---|
 | `<PageDown>` / `<PageUp>` | any pane | next / previous changed file |
 | `]f` / `[f` | any pane | same, alternate binding |
+| `<S-PageDown>` / `<S-PageUp>` | any pane | next / previous stream of work |
+| `]F` / `[F` | any pane | same, alternate binding |
 | `<End>` | any pane | toggle viewed — ticking advances to the next file |
 | `<leader>ge` | any pane | toggle the AI comments column |
 | `]c` / `[c` | diff panes | next / previous hunk (Vim built-in) |

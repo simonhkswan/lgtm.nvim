@@ -136,6 +136,10 @@ local defaults = {
         prev_file = "<PageUp>",
         next_file_alt = "]f",
         prev_file_alt = "[f",
+        next_feature = "<S-PageDown>",
+        prev_feature = "<S-PageUp>",
+        next_feature_alt = "]F",
+        prev_feature_alt = "[F",
         toggle_viewed = "<End>",
         toggle_explain = "<leader>ge",
         tree_toggle_viewed = "m",
@@ -264,15 +268,16 @@ M._goto_index = goto_index
 --- viewed marks stay one set of state however the list is filtered.
 --- @param idx number|nil index into session.guide.features
 --- @param opts table|nil `focus` hands focus to the working pane afterwards
+--- @return boolean selected false when the stream matched no real files
 local function select_feature(idx, opts)
     if not session_valid() then
-        return
+        return false
     end
     local entries = session.all_entries
     if idx then
         local f = session.guide and session.guide.features[idx]
         if not f then
-            return
+            return false
         end
         local want = {}
         for _, p in ipairs(f.files or {}) do
@@ -283,7 +288,7 @@ local function select_feature(idx, opts)
         end, session.all_entries)
         if #entries == 0 then
             notify("no changed files matched this stream")
-            return
+            return false
         end
     end
 
@@ -299,9 +304,33 @@ local function select_feature(idx, opts)
     end
     render_desc()
     goto_index(target, opts and opts.focus or false)
+    return true
 end
 
 M._select_feature = select_feature
+
+--- Cycle through the picker from any pane: All files → stream 1 → … → stream n,
+--- wrapping. Streams that match no real files are stepped over, the same way the
+--- picker refuses them.
+local function step_feature(delta)
+    if not session_valid() then
+        return
+    end
+    local n = session.guide and #session.guide.features or 0
+    if n == 0 then
+        notify("no reviewer guide yet — run :LgtmExplain")
+        return
+    end
+    local cur = session.feature or 0
+    for _ = 1, n + 1 do
+        cur = (cur + delta) % (n + 1)
+        if select_feature(cur ~= 0 and cur or nil) then
+            return
+        end
+    end
+end
+
+M._step_feature = step_feature
 
 --- Exposed for tests and for poking at a live session from :lua.
 function M._session()
@@ -491,6 +520,10 @@ function apply_keys(buf, is_tree)
     map(buf, k.prev_file, function() step(-1) end, "previous changed file")
     map(buf, k.next_file_alt, function() step(1) end, "next changed file")
     map(buf, k.prev_file_alt, function() step(-1) end, "previous changed file")
+    map(buf, k.next_feature, function() step_feature(1) end, "next stream")
+    map(buf, k.prev_feature, function() step_feature(-1) end, "previous stream")
+    map(buf, k.next_feature_alt, function() step_feature(1) end, "next stream")
+    map(buf, k.prev_feature_alt, function() step_feature(-1) end, "previous stream")
     map(buf, k.toggle_viewed, toggle_viewed, "toggle viewed")
     map(buf, k.toggle_explain, function() toggle_explain(false) end, "toggle the explanation column")
     map(buf, k.close, function() close_session(false) end, "close session")
