@@ -215,7 +215,7 @@ local function chapter_rows()
 end
 
 --- What the description pane shows follows the chapter picker: a chapter's summary
---- while one is selected, the PR itself on "All files".
+--- while one is selected, the PR itself on "ALL".
 local function render_desc()
     if not session_valid() then
         return
@@ -247,6 +247,20 @@ local function redraw_chapters()
     end
     local rows = chapter_rows()
     if not rows then
+        -- The guide run is still planning; say so rather than sitting empty
+        -- until guide.json lands.
+        local text = "   planning chapters…"
+        vim.bo[session.chapter_buf].modifiable = true
+        vim.api.nvim_buf_set_lines(session.chapter_buf, 0, -1, false, { text })
+        vim.bo[session.chapter_buf].modifiable = false
+        local ns = vim.api.nvim_create_namespace("lgtm_chapters_loading")
+        vim.api.nvim_buf_clear_namespace(session.chapter_buf, ns, 0, -1)
+        pcall(vim.api.nvim_buf_set_extmark, session.chapter_buf, ns, 0, 0, {
+            end_col = #text,
+            hl_group = "Comment",
+        })
+        session.chapter_map = {}
+        pcall(vim.api.nvim_win_set_height, session.chapter_win, 1)
         return
     end
     session.chapter_map = tree.render_chapters(session.chapter_buf, {
@@ -269,9 +283,10 @@ local function close_chapter_picker()
 end
 
 --- The picker's own window, between the description and the tree. Created with
---- the AI comments column and only once a guide exists; both leave together.
+--- the AI comments column — before the guide exists, it shows the planning
+--- placeholder — and both leave together.
 local function open_chapter_picker()
-    if not session_valid() or chapter_picker_open() or not session.guide then
+    if not session_valid() or chapter_picker_open() then
         return
     end
     if not vim.api.nvim_win_is_valid(session.tree_win) then
@@ -296,7 +311,10 @@ local function open_chapter_picker()
     vim.wo[win].relativenumber = false
     vim.wo[win].wrap = false
     vim.wo[win].signcolumn = "no"
-    vim.wo[win].cursorline = true
+    -- No cursorline: the cursor usually parks on the top row and a permanent
+    -- band there reads as "ALL is selected" whatever is actually selected. The
+    -- selection carries its own band (LgtmCurrentLine).
+    vim.wo[win].cursorline = false
     vim.wo[win].winfixwidth = true
     vim.wo[win].winfixheight = true
     vim.wo[win].colorcolumn = ""
@@ -372,7 +390,7 @@ end
 
 M._goto_index = goto_index
 
---- Select a chapter from the guide (nil for "All files"): the tree, paging and
+--- Select a chapter from the guide (nil for "ALL"): the tree, paging and
 --- the viewed-advance all narrow to its files, and the description pane swaps to
 --- its summary. The entry tables are shared with `all_entries`, so counts and
 --- viewed marks stay one set of state however the list is filtered.
@@ -419,7 +437,7 @@ end
 
 M._select_chapter = select_chapter
 
---- Cycle through the picker from any pane: All files → chapter 1 → … → chapter n,
+--- Cycle through the picker from any pane: ALL → chapter 1 → … → chapter n,
 --- wrapping. Chapters that match no real files are stepped over, the same way the
 --- picker refuses them.
 local function step_chapter(delta)

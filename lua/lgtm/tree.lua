@@ -107,12 +107,12 @@ function M.display_order(entries)
     return out
 end
 
---- Render the chapter picker into its own buffer: "All files", then one block per
+--- Render the chapter picker into its own buffer: "ALL", then one block per
 --- chapter of the reviewer guide, each priced with the change it actually covers.
 --- @param opts table { chapters, selected, width } — `chapters` rows are
 ---        { title, files, added, deleted, viewed }; `selected` is nil while every
 ---        file is shown.
---- @return table line -> { kind = "chapter", index } map (index 0 is All files)
+--- @return table line -> { kind = "chapter", index } map (index 0 is ALL)
 function M.render_chapters(buf, opts)
     local width = opts.width or 40
     local lines, marks, line_map = {}, {}, {}
@@ -151,7 +151,7 @@ function M.render_chapters(buf, opts)
         end
     end
 
-    chapter_row(0, "All files", nil, opts.selected == nil)
+    chapter_row(0, "ALL", nil, opts.selected == nil)
     for i, f in ipairs(opts.chapters or {}) do
         chapter_row(
             i,

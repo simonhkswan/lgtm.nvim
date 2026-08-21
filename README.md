@@ -134,14 +134,14 @@ model calls at all.
 
 ### The chapter picker
 
-Once the guide lands, a chapter picker opens as its own pane between the PR
-description and the file tree. The picker comes and goes with the comments
-column — one `<leader>ge` toggles the pair, and toggling off drops any chapter
-filter back to all files:
+A chapter picker opens as its own pane between the PR description and the file
+tree, showing `planning chapters…` until the guide run delivers. The picker
+comes and goes with the comments column — one `<leader>ge` toggles the pair,
+and toggling off drops any chapter filter back to all files:
 
 ```
 │ 󰙴 CHAPTERS                           │
-│ ● All files                          │
+│ ● ALL                                │
 │   Cross-editor IMG. N allocation     │
 │     0/4 viewed  ·  +435 −0           │
 │   E2E coverage for inline images     │
@@ -153,7 +153,7 @@ generated content is labelled at a glance.
 
 `<CR>` on a chapter narrows the file tree — and paging, and the viewed-advance —
 to that chapter's files, and the description pane swaps to the chapter's summary.
-"All files" restores the full tree and the PR body. A file can belong to
+"ALL" restores the full tree and the PR body. A file can belong to
 several chapters or to none, and the guide is cached with the explanations, so
 it is there instantly on the next session.
 
