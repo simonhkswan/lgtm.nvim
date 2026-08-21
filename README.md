@@ -129,7 +129,9 @@ model call per file.
 
 The same run also writes a reviewer guide: the PR split into its streams of
 work, each with a one-line title, a summary, and the files it touches. Once it
-lands, a stream picker appears above the file tree:
+lands, a stream picker appears above the file tree. The picker comes and goes
+with the comments column — one `<leader>ge` toggles the pair, and toggling off
+drops any stream filter back to all files:
 
 ```
 │ ● All files                          │

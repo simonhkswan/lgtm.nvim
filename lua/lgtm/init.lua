@@ -171,7 +171,9 @@ end
 --- so the picker carries real counts rather than whatever the agent said. Paths
 --- the guide names that are not in the change are simply not counted.
 local function feature_rows()
-    if not (session and session.guide) then
+    -- The picker and the AI comments come together: both are products of the
+    -- same run, and one toggle governs the pair.
+    if not (session and session.guide and explain.is_open(session)) then
         return nil
     end
     local by_path = {}
@@ -316,9 +318,13 @@ local function step_feature(delta)
     if not session_valid() then
         return
     end
+    if not explain.is_open(session) then
+        notify("streams come with the AI comments — toggle them in first")
+        return
+    end
     local n = session.guide and #session.guide.features or 0
     if n == 0 then
-        notify("no reviewer guide yet — run :LgtmExplain")
+        notify("no reviewer guide yet — it arrives with the run")
         return
     end
     local cur = session.feature or 0
@@ -412,6 +418,14 @@ local function toggle_explain(force)
     end
     if explain.is_open(session) then
         explain.close(session)
+        -- The stream picker leaves with the comments. Dropping a live filter
+        -- goes through select_feature so the tree, paging and the description
+        -- pane all return to the whole PR together.
+        if session.feature then
+            select_feature(nil)
+        else
+            redraw_tree()
+        end
         ruler.update(session)
         return
     end
@@ -420,6 +434,7 @@ local function toggle_explain(force)
     end
     apply_keys(session.explain_buf, false)
     ruler.update(session)
+    redraw_tree()
     explain.refresh(session, { force = force })
 end
 
