@@ -29,7 +29,7 @@ local M = {}
 
 -- Part of the store's identity: results produced by an older prompt are not results
 -- for this one.
-M.PROMPT_VERSION = 6
+M.PROMPT_VERSION = 7
 
 -- Phase 1: plan the review. This run writes ONE file and does nothing else.
 local GUIDE_CONTRACT = [[
@@ -96,9 +96,11 @@ says whether every caller was updated.
 
 You produce no prose for the user. Your entire output is files written with the
 Write tool, one per file in your list, into the output directory named in the
-request:
+request. Prefix every filename with the run tag you are given — a file shared
+between chapters is explained by each, and the tag is what keeps the runs from
+overwriting one another:
 
-  <output_dir>/<the file's path with every / replaced by __>.json
+  <output_dir>/<run_tag>.<the file's path with every / replaced by __>.json
 
 Each contains exactly this, and nothing else:
 
@@ -253,6 +255,7 @@ function M.build_explain_prompt(ctx)
     end
 
     table.insert(parts, string.format("<output_dir>%s</output_dir>", ctx.out_dir))
+    table.insert(parts, string.format("<run_tag>%s</run_tag>", ctx.run_tag or "run"))
 
     if ctx.current then
         table.insert(parts, string.format("<open_now>%s</open_now>", ctx.current))

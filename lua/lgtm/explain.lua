@@ -638,9 +638,9 @@ end
 --- from the one that started them is not a reason to throw the rest away.
 local function stop_run(session)
     stop_timer(session)
-    for _, job in pairs(session.explain_jobs or {}) do
+    for _, run in pairs(session.explain_jobs or {}) do
         pcall(function()
-            job:kill(15)
+            run.job:kill(15)
         end)
     end
     session.explain_jobs = {}
@@ -731,6 +731,9 @@ function launch(session, spec)
         ctx.current = spec.current
         ctx.only = spec.only
         ctx.budget = cfg.max_diff_bytes
+        -- Each run writes under its own tag, so two chapters explaining a
+        -- shared file cannot overwrite one another; the store merges by path.
+        ctx.run_tag = spec.key:gsub("[^%w%-]", "-")
         prompt, contract = ai.build_explain_prompt(ctx), ai.EXPLAIN_CONTRACT
     end
 
@@ -760,7 +763,10 @@ function launch(session, spec)
     end)
 
     if job then
-        session.explain_jobs[spec.key] = job
+        -- The spec rides along so the scheduler can see which paths are already
+        -- being worked on — a file shared by two chapters must not be handed to
+        -- both.
+        session.explain_jobs[spec.key] = { job = job, spec = spec }
     end
 
     if not session.explain_timer and running(session) > 0 then
@@ -833,6 +839,9 @@ function schedule_runs(session)
         end
     end
 
+    -- A file in more than one chapter is deliberately explained by EACH of its
+    -- chapters: every run writes under its own run tag and the store merges the
+    -- explanations by path, so the reviewer gets both readings side by side.
     local claimed = {}
     for _, i in ipairs(order) do
         local ch = chapters[i]
@@ -1027,7 +1036,7 @@ function M.refresh(session, opts)
     if opts.force then
         -- Make the arrival of the replacement observable to the watcher, and stop
         -- the old text being shown as though it were the new.
-        pcall(vim.fn.delete, vim.fs.joinpath(store_dir(session), store.slug(entry.path)))
+        store.delete_path(store_dir(session), entry.path)
         session.explain_store[entry.path] = nil
         store.record_sha(store_dir(session), entry.path, nil)
     end

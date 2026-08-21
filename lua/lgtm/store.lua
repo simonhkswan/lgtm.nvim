@@ -29,13 +29,6 @@ function M.dir(branch, merge_base, version)
     )
 end
 
---- The filename the agent is told to use for a path. Reversing this is deliberately
---- not relied on: every file carries its own `path` field and that is what indexes
---- the store, so a slug the agent got slightly wrong still lands correctly.
-function M.slug(path)
-    return (path:gsub("/", "__")) .. ".json"
-end
-
 local function read_json(file)
     local fd = io.open(file, "r")
     if not fd then
@@ -62,24 +55,60 @@ M.read_json = read_json
 M.write_json = write_json
 
 --- Every explanation in the store, indexed by the `path` field inside each file
---- rather than by filename.
+--- rather than by filename. Several files may carry the same path — a file
+--- shared between chapters is explained by each chapter's run, under its own
+--- run tag — and their explanations are merged into one list. Overlapping
+--- citations resolve later, in map_to_regions, where the best fit per region
+--- wins.
 --- @return table map path -> { path, explanations }
 function M.load(dir)
     local out = {}
     if vim.fn.isdirectory(dir) == 0 then
         return out
     end
+    -- Sorted, so a merge is the same list whatever order the filesystem
+    -- enumerates in.
+    local names = {}
     for name, kind in vim.fs.dir(dir) do
-        -- `_`-prefixed files are the plugin's own bookkeeping; the agent owns the
-        -- rest of the directory.
+        -- `_`-prefixed files are the plugin's own bookkeeping; the agents own
+        -- the rest of the directory.
         if kind == "file" and name:match("%.json$") and not name:match("^_") then
-            local data = read_json(vim.fs.joinpath(dir, name))
-            if data and type(data.path) == "string" and type(data.explanations) == "table" then
+            table.insert(names, name)
+        end
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        local data = read_json(vim.fs.joinpath(dir, name))
+        if data and type(data.path) == "string" and type(data.explanations) == "table" then
+            if out[data.path] then
+                vim.list_extend(out[data.path].explanations, data.explanations)
+            else
                 out[data.path] = data
             end
         end
     end
     return out
+end
+
+--- Delete every stored explanation for one path, whichever runs wrote them.
+--- This is what a targeted regeneration clears — filename alone cannot find
+--- them, since each run writes under its own tag.
+--- @return number files deleted
+function M.delete_path(dir, path)
+    local n = 0
+    if vim.fn.isdirectory(dir) == 0 then
+        return 0
+    end
+    for name, kind in vim.fs.dir(dir) do
+        if kind == "file" and name:match("%.json$") and not name:match("^_") and name ~= "guide.json" then
+            local file = vim.fs.joinpath(dir, name)
+            local data = read_json(file)
+            if data and data.path == path and vim.fn.delete(file) == 0 then
+                n = n + 1
+            end
+        end
+    end
+    return n
 end
 
 --- The reviewer guide: the guide run's one output, splitting the change into
