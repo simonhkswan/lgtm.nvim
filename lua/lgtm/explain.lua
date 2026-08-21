@@ -487,7 +487,7 @@ local function set_winbar(session, entry, note)
     local text = table.concat({
         -- Robot-and-sparkle, then the label in the magenta wash: this pane's
         -- content is generated, and the same mark sits on the stream picker.
-        "%#LgtmWinbarAIIcon# 󰚩󰙴 " .. require("lgtm.layout").ai_label("EXPLAIN") .. "  %#LgtmWinbarDim#",
+        "%#LgtmWinbarAIIcon# 󰙴 " .. require("lgtm.layout").ai_label("EXPLAIN") .. "  %#LgtmWinbarDim#",
         (name:gsub("%%", "%%%%")),
         "  %=",
         (note or ""):gsub("%%", "%%%%"),

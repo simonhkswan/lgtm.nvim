@@ -295,7 +295,7 @@ local function open_feature_picker()
     -- same mark the explanation column carries.
     -- Nerd-font robot plus md-creation sparkle, then the label in the magenta
     -- wash. A nerd font is already assumed by the devicons in the tree.
-    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# 󰚩󰙴 " .. layout.ai_label("STREAMS")
+    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# 󰙴 " .. layout.ai_label("STREAMS")
     vim.api.nvim_set_current_win(prev)
 
     -- The session's paging and toggle keys, plus the picker's own selection.
