@@ -139,7 +139,7 @@ file tree. The picker comes and goes with the comments column — one
 all files:
 
 ```
-│ 󰙴 STREAMS                            │
+│ 󰚩󰙴 STREAMS                            │
 │ ● All files                          │
 │   Cross-editor IMG. N allocation     │
 │     0/4 viewed  ·  +435 −0           │
@@ -147,7 +147,7 @@ all files:
 │     2/3 viewed  ·  +118 −6           │
 ```
 
-Both AI panes — the picker and the comments column — carry a `󰙴` header, so
+Both AI panes — the picker and the comments column — carry a `󰚩󰙴` header, so
 generated content is labelled at a glance.
 
 `<CR>` on a stream narrows the file tree — and paging, and the viewed-advance —
