@@ -536,17 +536,31 @@ their `-` glyphs are hidden, since they are structure rather than content.
 Turn the whole thing off with `diff_colors = false`, or tune `line_sat`,
 `line_lift`, `word_sat` and `word_lift`.
 
-## Setup
+## Installation
+
+With [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 {
-    dir = "~/dev/lgtm.nvim",
-    dependencies = { "nvim-tree/nvim-web-devicons" },
+    "simonhkswan/lgtm.nvim",
+    dependencies = {
+        "nvim-tree/nvim-web-devicons",       -- optional: file icons in the tree
+        "nvim-telescope/telescope.nvim",     -- optional: only for :LgtmPick
+    },
     cmd = { "LgtmEdit", "LgtmClose", "LgtmPick", "LgtmExplain" },
     keys = { { "<leader>gd", "<cmd>LgtmEdit<CR>", desc = "PR diff review" } },
     config = function()
         require("lgtm").setup({})
     end,
+}
+```
+
+To work on the plugin itself, point lazy.nvim at your local clone instead:
+
+```lua
+{
+    dir = "/path/to/lgtm.nvim",
+    -- same spec as above
 }
 ```
 
@@ -596,5 +610,7 @@ Set `LGTM_NO_GH=1` in the environment to skip the `gh` lookup entirely.
 
 - Neovim 0.10+ (`vim.system`). Developed against 0.12.
 - `git`
+- [telescope.nvim](https://github.com/nvim-telescope/telescope.nvim), optional — only for `:LgtmPick`
+- [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons), optional — file icons in the tree
 - `gh`, optional — only for detecting the PR's real target branch
 - `claude`, optional — only for the AI comments column
