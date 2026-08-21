@@ -475,7 +475,7 @@ function M.open_pr(number, opts)
     end
 
     notify("fetching open PRs…")
-    git.pr_list(root, function(prs, err)
+    git.pr_list(root, opts.pr_limit or require("lgtm").config.pr_limit, function(prs, err)
         if not prs then
             notify(err or "gh pr list failed", vim.log.levels.WARN)
             return

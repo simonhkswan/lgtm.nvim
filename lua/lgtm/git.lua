@@ -151,10 +151,11 @@ end
 --- of decoded PRs, or (nil, why) when gh cannot answer.
 ---
 --- Deliberately light: only the fields a picker row needs. A repository can
---- have a lot of open PRs, and 50 full bodies with diff stats is a heavy answer
---- to a question whose display is one line each. The full PR is fetched per
---- selection instead, by the previewer.
-function M.pr_list(cwd, cb)
+--- have a lot of open PRs, and hundreds of full bodies with diff stats is a
+--- heavy answer to a question whose display is one line each. The full PR is
+--- fetched per selection instead, by the previewer — which is what makes a
+--- generous limit affordable.
+function M.pr_list(cwd, limit, cb)
     if vim.fn.executable("gh") ~= 1 or vim.env.LGTM_NO_GH then
         vim.schedule(function()
             cb(nil, "the GitHub CLI (gh) is not available")
@@ -162,7 +163,7 @@ function M.pr_list(cwd, cb)
         return
     end
     vim.system(
-        { "gh", "pr", "list", "--limit", "50", "--json", "number,title,headRefName,author,isDraft" },
+        { "gh", "pr", "list", "--limit", tostring(limit or 1000), "--json", "number,title,headRefName,author,isDraft" },
         { cwd = cwd, text = true },
         function(res)
             vim.schedule(function()

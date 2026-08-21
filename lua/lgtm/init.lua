@@ -41,6 +41,10 @@ local defaults = {
     generated = "skip", -- "skip" | "show"
     max_file_size = 1024 * 1024,
     gh_timeout = 8000,
+    -- How many open PRs :LgtmPr lists, newest first. The list is one light row
+    -- per PR (the body is fetched per selection), so a generous cap is cheap —
+    -- this is a backstop against a pathological repository, not a page size.
+    pr_limit = 1000,
     -- A strip down the right edge of the working pane showing where the hunks
     -- sit in the file as a whole, and which part of it you are looking at.
     ruler = true,

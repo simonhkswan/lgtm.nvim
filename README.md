@@ -176,9 +176,9 @@ work.
 ```
 
 For when someone asks "can you check my branch?". The bare form lists open
-PRs (searchable by number, title, branch, and author, with the PR body as the
-preview); either form runs `gh pr checkout` — fork PRs included — and opens
-the review. Requires `gh`, refuses over uncommitted work, and reuses an
+PRs, newest first (up to `pr_limit`, 1000 by default), searchable by number,
+title, branch, and author, with the PR body as the preview; either form runs
+`gh pr checkout` — fork PRs included — and opens the review. Requires `gh`, refuses over uncommitted work, and reuses an
 existing worktree or checkout when the branch is already local.
 
 ## Options
