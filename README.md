@@ -123,6 +123,26 @@ archaeology.
 Nothing runs until you toggle the column in; plenty of reviews do not want a
 model call per file.
 
+### Streams of work
+
+The same run also writes a reviewer guide: the PR split into its streams of
+work, each with a one-line title, a summary, and the files it touches. Once it
+lands, a stream picker appears above the file tree:
+
+```
+│ ● All files                          │
+│   Cross-editor IMG. N allocation     │
+│     0/4 viewed  ·  +435 −0           │
+│   E2E coverage for inline images     │
+│     2/3 viewed  ·  +118 −6           │
+```
+
+`<CR>` on a stream narrows the file tree — and paging, and the viewed-advance —
+to that stream's files, and the description pane swaps to the stream's summary.
+"All files" restores the full tree and the PR body. A file can belong to
+several streams or to none, and the guide is cached with the explanations, so
+it is there instantly on the next session.
+
 ## Picking a branch
 
 ```

@@ -22,7 +22,7 @@ local M = {}
 
 -- Part of the store's identity: results produced by an older prompt are not results
 -- for this one.
-M.PROMPT_VERSION = 4
+M.PROMPT_VERSION = 5
 
 local CONTRACT = [[
 You are explaining a pull request to a reviewer who is reading its diff in their
@@ -76,6 +76,34 @@ Each contains exactly this, and nothing else:
     code: what it changes about the system. For a migration that means the table or
     column, its type, its nullability and what reads it — not its position in the
     revision graph, unless the graph is what the change alters.
+
+BEFORE the per-file explanations, write one more file:
+
+  <output_dir>/guide.json
+
+a reviewer's guide that splits the change into its streams of work — the distinct
+things this PR does, each touching its own subset of files:
+
+{"features":[{"title":"...","summary":"...","files":["path/one.py","path/two.ts"]}]}
+
+  * Derive the streams from the diff itself: skim the stat and the shape of the
+    change, and use the PR description where it helps. If the description already
+    contains a reviewer guide or a table of work groups, follow its grouping.
+  * Usually 1 to 8 streams. A stream is one coherent piece of work, not a
+    directory.
+  * "title" is a one-line label for a narrow picker row: at most 48 characters,
+    no trailing full stop.
+  * "summary" is markdown for a detail pane: 2-6 sentences on what this stream
+    does, how its files relate, and where to start reading. `backticks` for
+    identifiers.
+  * "files" lists the stream's paths EXACTLY as they appear in the stat. A file
+    may appear in more than one stream, or in none.
+  * Write guide.json FIRST, before any deep per-file reading — it unlocks
+    navigation in the reviewer's editor. Refine it at the end only if the deep
+    read proved its grouping wrong.
+  * The guide then frames the per-file work: explain each file as part of its
+    stream, and when a change is only explicable through the stream's other
+    files, name them.
 
 Rules about the run itself:
 
@@ -181,13 +209,17 @@ function M.build_prompt(ctx)
         )
     end
 
+    if ctx.guide_done then
+        table.insert(parts, "<guide_done>guide.json is already written; leave it alone.</guide_done>")
+    end
+
     if ctx.only and #ctx.only > 0 then
         table.insert(
             parts,
             "<regenerate_only>\n"
                 .. table.concat(ctx.only, "\n")
                 .. "\n</regenerate_only>\n\nExplain ONLY the files listed above, and write only those. "
-                .. "Everything else in the change is already done; leave it alone."
+                .. "Everything else in the change is already done, guide.json included; leave it alone."
         )
     else
         table.insert(

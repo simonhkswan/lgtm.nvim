@@ -109,7 +109,10 @@ end
 
 --- Render the tree into `buf`, returning the line -> entry map used for
 --- navigation and cursor tracking.
---- @param opts table { entries, store, current_path, folded, header }
+--- @param opts table { entries, store, current_path, folded, header,
+---        features, selected_feature } — `features` is the stream picker's rows,
+---        each { title, files, added, deleted, viewed }; `selected_feature` is
+---        nil while every file is shown.
 function M.render(buf, opts)
     local entries, store = opts.entries, opts.store
     local folded = opts.folded or {}
@@ -135,12 +138,70 @@ function M.render(buf, opts)
         wd = math.max(wd, #("-" .. e.deleted))
     end
 
-    local viewed = store and store:count_viewed() or 0
+    -- Within what is on show, not store-wide: with a stream selected the header
+    -- reads as that stream's own progress.
+    local viewed = 0
+    for _, e in ipairs(entries) do
+        if store and store:is_viewed(e.path) then
+            viewed = viewed + 1
+        end
+    end
     table.insert(lines, string.format(" %d files  +%d  -%d", #entries, total_added, total_deleted))
     table.insert(marks, { line = 0, col = 0, end_col = #lines[1], hl = "Title" })
     table.insert(lines, string.format(" %d/%d viewed  ·  %s", viewed, #entries, opts.header or ""))
     table.insert(marks, { line = 1, col = 0, end_col = #lines[2], hl = "Comment" })
     table.insert(lines, "")
+
+    -- The stream picker: the guide's streams of work, each filtering the tree
+    -- below to its own files. Only there once a guide exists — before the first
+    -- explanation run the session looks exactly as it always did.
+    if opts.features and #opts.features > 0 then
+        local width = opts.width or 40
+        local function feature_row(idx, title, stats, selected)
+            local marker = selected and ICONS.current or ICONS.unviewed
+            local head = string.format(" %s ", marker)
+            local room = width - vim.fn.strdisplaywidth(head) - 1
+            if room >= 8 and vim.fn.strdisplaywidth(title) > room then
+                title = title:sub(1, math.max(1, room - 1)) .. "…"
+            end
+            local text = head .. title
+            table.insert(lines, text)
+            local row = #lines - 1
+            line_map[#lines] = { kind = "feature", index = idx }
+            table.insert(marks, {
+                line = row,
+                col = 1,
+                end_col = 1 + #marker,
+                hl = selected and "LgtmCurrent" or "Comment",
+            })
+            table.insert(marks, {
+                line = row,
+                col = #head,
+                end_col = #text,
+                hl = selected and "LgtmCurrentName" or "Normal",
+            })
+            if selected then
+                table.insert(marks, { line = row, line_hl = "LgtmCurrentLine" })
+            end
+            if stats then
+                local text2 = "     " .. stats
+                table.insert(lines, text2)
+                line_map[#lines] = { kind = "feature", index = idx }
+                table.insert(marks, { line = #lines - 1, col = 0, end_col = #text2, hl = "Comment" })
+            end
+        end
+
+        feature_row(0, "All files", nil, opts.selected_feature == nil)
+        for i, f in ipairs(opts.features) do
+            feature_row(
+                i,
+                f.title,
+                string.format("%d/%d viewed  ·  +%d −%d", f.viewed, f.files, f.added, f.deleted),
+                opts.selected_feature == i
+            )
+        end
+        table.insert(lines, "")
+    end
 
     --- Break a collapsed chain like "a/b/c/d" into lines that fit, splitting on
     --- the separators. Eliding to "…/c/d" throws away the outer directories,

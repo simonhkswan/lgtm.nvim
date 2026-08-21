@@ -82,6 +82,32 @@ function M.load(dir)
     return out
 end
 
+--- The reviewer guide: the same run's one non-per-file output, splitting the
+--- change into streams of work. Kept beside the explanations because it shares
+--- their identity — a guide written against an older prompt or merge base is not
+--- a guide for this one.
+--- @return table|nil { features = { { title, summary, files = {paths} } } }
+function M.load_guide(dir)
+    local data = read_json(vim.fs.joinpath(dir, "guide.json"))
+    if not (data and type(data.features) == "table") then
+        return nil
+    end
+    local features = {}
+    for _, f in ipairs(data.features) do
+        if type(f) == "table" and type(f.title) == "string" then
+            table.insert(features, {
+                title = vim.trim(f.title),
+                summary = type(f.summary) == "string" and f.summary or "",
+                files = type(f.files) == "table" and f.files or {},
+            })
+        end
+    end
+    if #features == 0 then
+        return nil
+    end
+    return { features = features }
+end
+
 --- Content hashes recorded when an explanation was first read, so a file edited in
 --- the working pane can be reported as having outrun its explanation. Kept in a
 --- file of the plugin's own rather than stamped into the agent's output, which may

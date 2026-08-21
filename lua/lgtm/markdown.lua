@@ -449,6 +449,43 @@ function M.render_pr(pr, branch, width, note)
     return lines, marks
 end
 
+--- Lay out one stream of the reviewer guide: its one-line title, its stats, then
+--- its summary — the same shape render_pr gives the PR itself, so switching
+--- streams reads as the pane changing subject rather than changing form.
+--- @param feature table { title, summary }
+--- @param stats table|nil { files, added, deleted, viewed }
+--- @return table lines, table marks
+function M.render_feature(feature, stats, width)
+    local lines, marks = {}, {}
+    for _, l in ipairs(M.wrap(feature.title or "", width - 2)) do
+        table.insert(lines, l)
+        table.insert(marks, { line = #lines - 1, hl = "LgtmMdH1" })
+    end
+    if stats then
+        local meta = string.format(
+            "%d files  ·  +%d −%d  ·  %d/%d viewed",
+            stats.files or 0,
+            stats.added or 0,
+            stats.deleted or 0,
+            stats.viewed or 0,
+            stats.files or 0
+        )
+        for _, l in ipairs(M.wrap(meta, width - 2)) do
+            table.insert(lines, l)
+            table.insert(marks, { line = #lines - 1, hl = "LgtmMdMeta" })
+        end
+    end
+    table.insert(lines, "")
+
+    local body_lines, body_marks = M.format(feature.summary or "", width)
+    local offset = #lines
+    vim.list_extend(lines, body_lines)
+    for _, m in ipairs(body_marks) do
+        table.insert(marks, { line = m.line + offset, col = m.col, end_col = m.end_col, hl = m.hl, eol = m.eol })
+    end
+    return lines, marks
+end
+
 --- @param diff_colors table|nil shares lgtm's palette maths, so the code chip
 ---        is positioned against the real background rather than guessed
 function M.setup_highlights(diff_colors)

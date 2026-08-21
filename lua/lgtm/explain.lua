@@ -63,19 +63,26 @@ local function store_dir(session)
     return store.dir(session.branch, session.merge_base, ai.PROMPT_VERSION)
 end
 
+--- The full change. `session.entries` is the list the tree is showing, and a
+--- selected stream narrows it — but the run, its progress and its resume list are
+--- always about every file in the PR.
+local function all_entries(session)
+    return session.all_entries or session.entries
+end
+
 --- How far the run has got, for the pane's own progress line.
 local function progress(session)
     local done = 0
     for _ in pairs(session.explain_store or {}) do
         done = done + 1
     end
-    return done, #session.entries
+    return done, #all_entries(session)
 end
 
 --- Files in the change with no explanation yet.
 local function outstanding(session)
     local out = {}
-    for _, e in ipairs(session.entries) do
+    for _, e in ipairs(all_entries(session)) do
         if not (session.explain_store or {})[e.path] then
             table.insert(out, e.path)
         end
@@ -90,7 +97,21 @@ function M.clear_store(session)
         return 0
     end
     session.explain_store = {}
-    return store.clear(store_dir(session))
+    local n = store.clear(store_dir(session))
+    -- The guide is part of the store, so clearing one clears the other; the
+    -- stream picker follows it off the screen.
+    if session.guide then
+        session.guide, session.guide_json = nil, nil
+        if session.on_guide then
+            session.on_guide()
+        end
+    end
+    return n
+end
+
+--- The reviewer guide for this branch, if a run has written one.
+function M.load_guide(session)
+    return store.load_guide(store_dir(session))
 end
 
 -- ---------------------------------------------------------------------------
@@ -682,10 +703,11 @@ local function ensure_run(session, opts)
         branch = session.branch,
         base_ref = session.base_ref,
         merge_base = session.merge_base,
-        entries = session.entries,
+        entries = all_entries(session),
         current = entry and entry.path or nil,
         out_dir = dir,
         done = done,
+        guide_done = session.guide ~= nil,
         only = opts.only,
     })
 
@@ -734,6 +756,19 @@ function M.reload(session)
     end
     local before = (session.explain_store or {})[(session.entries[session.index] or {}).path]
     session.explain_store = store.load(store_dir(session))
+    -- The guide arrives through the same watcher as the explanations — it is the
+    -- run's first write. Compared as JSON so a refinement at the end of the run
+    -- also lands.
+    local guide = store.load_guide(store_dir(session))
+    if guide then
+        local encoded = vim.json.encode(guide)
+        if encoded ~= session.guide_json then
+            session.guide, session.guide_json = guide, encoded
+            if session.on_guide then
+                session.on_guide()
+            end
+        end
+    end
     local entry = session.entries[session.index]
     if not entry then
         return

@@ -163,6 +163,55 @@ local function session_valid()
     return session ~= nil and session.tab and vim.api.nvim_tabpage_is_valid(session.tab)
 end
 
+--- The stream picker's rows: each guide stream priced against the actual change,
+--- so the picker carries real counts rather than whatever the agent said. Paths
+--- the guide names that are not in the change are simply not counted.
+local function feature_rows()
+    if not (session and session.guide) then
+        return nil
+    end
+    local by_path = {}
+    for _, e in ipairs(session.all_entries or session.entries) do
+        by_path[e.path] = e
+    end
+    local rows = {}
+    for _, f in ipairs(session.guide.features or {}) do
+        local n, added, deleted, viewed = 0, 0, 0, 0
+        for _, p in ipairs(f.files or {}) do
+            local e = by_path[p]
+            if e then
+                n = n + 1
+                added = added + (e.added or 0)
+                deleted = deleted + (e.deleted or 0)
+                if session.store:is_viewed(p) then
+                    viewed = viewed + 1
+                end
+            end
+        end
+        table.insert(rows, { title = f.title, files = n, added = added, deleted = deleted, viewed = viewed })
+    end
+    return rows
+end
+
+--- What the description pane shows follows the stream picker: a stream's summary
+--- while one is selected, the PR itself on "All files".
+local function render_desc()
+    if not session_valid() then
+        return
+    end
+    local width = vim.api.nvim_win_get_width(session.desc_win)
+    local f = session.feature and session.guide and session.guide.features[session.feature] or nil
+    if f then
+        local rows = feature_rows()
+        markdown.apply(
+            session.desc_buf,
+            markdown.render_feature(f, rows and rows[session.feature] or nil, width)
+        )
+    else
+        markdown.apply(session.desc_buf, markdown.render_pr(session.pr, session.branch, width))
+    end
+end
+
 local function redraw_tree()
     if not session_valid() then
         return
@@ -175,6 +224,8 @@ local function redraw_tree()
         folded = session.folded,
         header = session.base_ref,
         width = session.cfg.tree_width,
+        features = feature_rows(),
+        selected_feature = session.feature,
     })
     -- Park the tree cursor on the current file so the highlight and the cursor
     -- agree with each other.
@@ -206,6 +257,51 @@ local function goto_index(idx, focus_working)
 end
 
 M._goto_index = goto_index
+
+--- Select a stream from the guide (nil for "All files"): the tree, paging and
+--- the viewed-advance all narrow to its files, and the description pane swaps to
+--- its summary. The entry tables are shared with `all_entries`, so counts and
+--- viewed marks stay one set of state however the list is filtered.
+--- @param idx number|nil index into session.guide.features
+--- @param opts table|nil `focus` hands focus to the working pane afterwards
+local function select_feature(idx, opts)
+    if not session_valid() then
+        return
+    end
+    local entries = session.all_entries
+    if idx then
+        local f = session.guide and session.guide.features[idx]
+        if not f then
+            return
+        end
+        local want = {}
+        for _, p in ipairs(f.files or {}) do
+            want[p] = true
+        end
+        entries = vim.tbl_filter(function(e)
+            return want[e.path]
+        end, session.all_entries)
+        if #entries == 0 then
+            notify("no changed files matched this stream")
+            return
+        end
+    end
+
+    session.feature = idx
+    local current = session.entries[session.index]
+    session.entries = entries
+    local target = 1
+    for i, e in ipairs(entries) do
+        if current and e.path == current.path then
+            target = i
+            break
+        end
+    end
+    render_desc()
+    goto_index(target, opts and opts.focus or false)
+end
+
+M._select_feature = select_feature
 
 --- Exposed for tests and for poking at a live session from :lua.
 function M._session()
@@ -311,6 +407,16 @@ end
 local function tree_open()
     local item = tree_cursor_item()
     if not item then
+        return
+    end
+    if item.kind == "feature" then
+        -- The redraw parks the tree cursor on the current file; put it back on
+        -- the picker so streams can be flicked through without re-climbing.
+        local line = vim.api.nvim_win_get_cursor(session.tree_win)[1]
+        select_feature(item.index ~= 0 and item.index or nil)
+        if session_valid() and vim.api.nvim_win_is_valid(session.tree_win) then
+            pcall(vim.api.nvim_win_set_cursor, session.tree_win, { line, 0 })
+        end
         return
     end
     if item.kind == "dir" then
@@ -467,11 +573,35 @@ function M.open(base_arg, opts)
         base_ref = base_ref,
         branch = branch,
         merge_base = merge_base,
+        -- `entries` is what the tree shows and paging walks; `all_entries` is the
+        -- whole change, which is what the explanation run and the stream stats
+        -- are always about. Same entry tables in both, so counts and viewed
+        -- marks are one set of state.
         entries = entries,
+        all_entries = entries,
+        feature = nil,
         store = store,
         index = 1,
         folded = {},
     })
+
+    -- A guide cached by an earlier run puts the stream picker up immediately;
+    -- otherwise it appears when the explanation run writes one.
+    session.guide = explain.load_guide(session)
+    session.guide_json = session.guide and vim.json.encode(session.guide) or nil
+    session.on_guide = function()
+        if not session_valid() then
+            return
+        end
+        if session.feature then
+            -- A refined guide may have regrouped or dropped the selected stream;
+            -- reselect so the filter follows it rather than going stale.
+            local n = session.guide and #session.guide.features or 0
+            select_feature(session.feature <= n and session.feature or nil)
+        else
+            redraw_tree()
+        end
+    end
 
     -- Reapply the maps each time a file is loaded into a pane, since :edit swaps
     -- the buffer out from under them.
@@ -497,7 +627,7 @@ function M.open(base_arg, opts)
             end
             local name = vim.api.nvim_buf_get_name(args.buf)
             local rel = name:sub(#session.root + 2)
-            for _, e in ipairs(session.entries) do
+            for _, e in ipairs(session.all_entries) do
                 if e.path == rel then
                     local fresh = git.changed_files(session.merge_base, session.root, {
                         include_untracked = session.cfg.include_untracked,
@@ -600,8 +730,7 @@ function M.open(base_arg, opts)
 
     -- The description pane fills in when gh answers; the session is usable
     -- immediately rather than waiting on the network.
-    local desc_width = vim.api.nvim_win_get_width(session.desc_win)
-    markdown.apply(session.desc_buf, markdown.render_pr(nil, branch, desc_width))
+    render_desc()
     git.pr_view(nil, root, function(pr)
         if not session_valid() then
             return
@@ -609,8 +738,10 @@ function M.open(base_arg, opts)
         -- Kept for the explanation agent, which is given the PR body as the
         -- statement of intent the diff is supposed to deliver.
         session.pr = pr
-        if session.desc_buf and vim.api.nvim_buf_is_valid(session.desc_buf) then
-            markdown.apply(session.desc_buf, markdown.render_pr(pr, branch, desc_width))
+        -- Only while the pane is showing the PR: a selected stream keeps its
+        -- summary rather than being interrupted by the network answering.
+        if not session.feature then
+            render_desc()
         end
     end)
 
