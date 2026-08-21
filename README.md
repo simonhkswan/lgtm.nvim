@@ -73,7 +73,7 @@ pass one explicitly: `:LgtmEdit origin/release-2`.
 |---|---|---|
 | `m` / `n` | any pane | next / previous changed file |
 | `<PageDown>` / `<PageUp>` | any pane | same, alternate binding |
-| `M` / `N` | any pane | next / previous stream of work |
+| `M` / `N` | any pane | next / previous chapter of work |
 | `<S-PageDown>` / `<S-PageUp>` | any pane | same, alternate binding |
 | `<End>` | any pane | toggle viewed — ticking advances to the next file |
 | `<leader>ge` | any pane | toggle the AI comments column |
@@ -116,30 +116,31 @@ One block per change region, aligned with the diff and scrolling with it:
 └────────────────────────────┴──────────────────────────────────────┘
 ```
 
-One headless `claude` run covers the whole PR. It gets the PR description and
-explores the repository itself, so it can connect a hunk in one file to what
-moved in another. Results stream in a file at a time — the file you have open
-arrives first — and are cached per branch, so a second session costs nothing.
+The work is phased. A fast first run reads the PR and writes a reviewer guide:
+the change split into **chapters** of work, each with a one-line title, a
+summary, and the files it touches. Then one run per chapter — in parallel —
+explains that chapter's files, each agent given its chapter and its files'
+diffs directly, with the whole repository readable behind them. Files no
+chapter claimed get a final run of their own. Small prompts, comments written
+with their chapter in view, and the file you have open is done first.
 
-The agent runs with write access **denied inside your repository**, so it
-cannot touch your working tree. Its notes explain what each change does and
-what it affects elsewhere, against the full branch diff — never commit
-archaeology.
+Results land a file at a time and are cached per branch, so a second session
+costs nothing. Every agent runs with write access **denied inside your
+repository**, so nothing can touch your working tree. The notes explain what
+each change does against the full branch diff — never commit archaeology.
 
-Nothing runs until you toggle the column in; plenty of reviews do not want a
-model call per file.
+Nothing runs until you toggle the column in; plenty of reviews do not want
+model calls at all.
 
-### Streams of work
+### The chapter picker
 
-The same run also writes a reviewer guide: the PR split into its streams of
-work, each with a one-line title, a summary, and the files it touches. Once it
-lands, a stream picker opens as its own pane between the PR description and the
-file tree. The picker comes and goes with the comments column — one
-`<leader>ge` toggles the pair, and toggling off drops any stream filter back to
-all files:
+Once the guide lands, a chapter picker opens as its own pane between the PR
+description and the file tree. The picker comes and goes with the comments
+column — one `<leader>ge` toggles the pair, and toggling off drops any chapter
+filter back to all files:
 
 ```
-│ 󰙴 STREAMS                            │
+│ 󰙴 CHAPTERS                           │
 │ ● All files                          │
 │   Cross-editor IMG. N allocation     │
 │     0/4 viewed  ·  +435 −0           │
@@ -150,10 +151,10 @@ all files:
 Both AI panes — the picker and the comments column — carry a `󰙴` header, so
 generated content is labelled at a glance.
 
-`<CR>` on a stream narrows the file tree — and paging, and the viewed-advance —
-to that stream's files, and the description pane swaps to the stream's summary.
+`<CR>` on a chapter narrows the file tree — and paging, and the viewed-advance —
+to that chapter's files, and the description pane swaps to the chapter's summary.
 "All files" restores the full tree and the PR body. A file can belong to
-several streams or to none, and the guide is cached with the explanations, so
+several chapters or to none, and the guide is cached with the explanations, so
 it is there instantly on the next session.
 
 ## Picking a branch
@@ -197,7 +198,8 @@ require("lgtm").setup({
         width = 76,
         cmd = { "claude" },     -- argv prefix; the headless flags are added
         model = "sonnet",       -- "" omits --model
-        timeout = 1800000,      -- the whole run, not the first file
+        max_parallel = 3,       -- chapter runs in flight at once
+        timeout = 1800000,      -- per run; a chapter is a fraction of the PR
     },
     diff_colors = {},           -- calmer diff tints derived from your theme;
                                 -- false keeps the colourscheme's own colours

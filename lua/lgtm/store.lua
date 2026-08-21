@@ -82,30 +82,30 @@ function M.load(dir)
     return out
 end
 
---- The reviewer guide: the same run's one non-per-file output, splitting the
---- change into streams of work. Kept beside the explanations because it shares
---- their identity — a guide written against an older prompt or merge base is not
---- a guide for this one.
---- @return table|nil { features = { { title, summary, files = {paths} } } }
+--- The reviewer guide: the guide run's one output, splitting the change into
+--- chapters of work. Kept beside the explanations because it shares their
+--- identity — a guide written against an older prompt or merge base is not a
+--- guide for this one.
+--- @return table|nil { chapters = { { title, summary, files = {paths} } } }
 function M.load_guide(dir)
     local data = read_json(vim.fs.joinpath(dir, "guide.json"))
-    if not (data and type(data.features) == "table") then
+    if not (data and type(data.chapters) == "table") then
         return nil
     end
-    local features = {}
-    for _, f in ipairs(data.features) do
-        if type(f) == "table" and type(f.title) == "string" then
-            table.insert(features, {
-                title = vim.trim(f.title),
-                summary = type(f.summary) == "string" and f.summary or "",
-                files = type(f.files) == "table" and f.files or {},
+    local chapters = {}
+    for _, c in ipairs(data.chapters) do
+        if type(c) == "table" and type(c.title) == "string" then
+            table.insert(chapters, {
+                title = vim.trim(c.title),
+                summary = type(c.summary) == "string" and c.summary or "",
+                files = type(c.files) == "table" and c.files or {},
             })
         end
     end
-    if #features == 0 then
+    if #chapters == 0 then
         return nil
     end
-    return { features = features }
+    return { chapters = chapters }
 end
 
 --- Content hashes recorded when an explanation was first read, so a file edited in

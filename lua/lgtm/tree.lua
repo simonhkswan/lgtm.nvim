@@ -107,17 +107,17 @@ function M.display_order(entries)
     return out
 end
 
---- Render the stream picker into its own buffer: "All files", then one block per
---- stream of the reviewer guide, each priced with the change it actually covers.
---- @param opts table { features, selected, width } — `features` rows are
+--- Render the chapter picker into its own buffer: "All files", then one block per
+--- chapter of the reviewer guide, each priced with the change it actually covers.
+--- @param opts table { chapters, selected, width } — `chapters` rows are
 ---        { title, files, added, deleted, viewed }; `selected` is nil while every
 ---        file is shown.
---- @return table line -> { kind = "feature", index } map (index 0 is All files)
-function M.render_features(buf, opts)
+--- @return table line -> { kind = "chapter", index } map (index 0 is All files)
+function M.render_chapters(buf, opts)
     local width = opts.width or 40
     local lines, marks, line_map = {}, {}, {}
 
-    local function feature_row(idx, title, stats, selected)
+    local function chapter_row(idx, title, stats, selected)
         local marker = selected and ICONS.current or ICONS.unviewed
         local head = string.format(" %s ", marker)
         local room = width - vim.fn.strdisplaywidth(head) - 1
@@ -127,7 +127,7 @@ function M.render_features(buf, opts)
         local text = head .. title
         table.insert(lines, text)
         local row = #lines - 1
-        line_map[#lines] = { kind = "feature", index = idx }
+        line_map[#lines] = { kind = "chapter", index = idx }
         table.insert(marks, {
             line = row,
             col = 1,
@@ -146,14 +146,14 @@ function M.render_features(buf, opts)
         if stats then
             local text2 = "     " .. stats
             table.insert(lines, text2)
-            line_map[#lines] = { kind = "feature", index = idx }
+            line_map[#lines] = { kind = "chapter", index = idx }
             table.insert(marks, { line = #lines - 1, col = 0, end_col = #text2, hl = "Comment" })
         end
     end
 
-    feature_row(0, "All files", nil, opts.selected == nil)
-    for i, f in ipairs(opts.features or {}) do
-        feature_row(
+    chapter_row(0, "All files", nil, opts.selected == nil)
+    for i, f in ipairs(opts.chapters or {}) do
+        chapter_row(
             i,
             f.title,
             string.format("%d/%d viewed  ·  +%d −%d", f.viewed, f.files, f.added, f.deleted),
@@ -208,8 +208,8 @@ function M.render(buf, opts)
         wd = math.max(wd, #("-" .. e.deleted))
     end
 
-    -- Within what is on show, not store-wide: with a stream selected the header
-    -- reads as that stream's own progress.
+    -- Within what is on show, not store-wide: with a chapter selected the header
+    -- reads as that chapter's own progress.
     local viewed = 0
     for _, e in ipairs(entries) do
         if store and store:is_viewed(e.path) then

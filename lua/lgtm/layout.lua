@@ -215,7 +215,7 @@ function M.setup_winbar_highlights()
     vim.api.nvim_set_hl(0, "LgtmWinbarDim", { link = "Comment" })
     vim.api.nvim_set_hl(0, "LgtmWinbarName", { bold = true })
     vim.api.nvim_set_hl(0, "LgtmWinbarBadge", { link = "WarningMsg" })
-    -- The headers of the AI-generated panes — the stream picker and the
+    -- The headers of the AI-generated panes — the chapter picker and the
     -- explanation column — so generated content is labelled at a glance. The
     -- icon takes the ramp's full magenta; the label washes out across it.
     for i, fg in ipairs(AI_RAMP) do

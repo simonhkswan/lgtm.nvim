@@ -55,12 +55,16 @@ local defaults = {
     -- not want one.
     explain = {
         width = 76,
-        -- One invocation for the whole PR, not one per file: a hunk is often only
-        -- explicable by what moved in another file, and per-file re-sent the
-        -- description and the stat every time while re-exploring the same shared
-        -- code. Results still arrive a file at a time, because the agent writes them
-        -- into a directory this watches.
+        -- Phased runs: a fast guide run plans the chapters, then one run per
+        -- chapter — in parallel, each with its chapter's diffs pasted in — then
+        -- a final run for files no chapter claimed. A chapter is the natural
+        -- unit: the files that must be read together, and nothing else. Results
+        -- still arrive a file at a time, because the agents write them into a
+        -- directory this watches.
         cmd = { "claude" },
+        -- How many runs may be in flight at once. Chapters are independent, so
+        -- this is purely a lid on local processes and API pressure.
+        max_parallel = 3,
         model = "sonnet",
         -- `Write` is here because the results *are* writes. It cannot be scoped to a
         -- directory through this list — every parenthesised form of Write is refused
@@ -83,18 +87,19 @@ local defaults = {
             -- about a revision pointer instead of the table being created.
         },
         extra_args = {},
-        -- A whole change, explored rather than skimmed. This is the ceiling on the
-        -- run, not on the first file, which lands long before it.
+        -- Per run, and a chapter is a fraction of the change, so this is roomy.
         timeout = 1800000,
-        -- How long to hold the run waiting for `gh pr view` to answer, so the agent
-        -- is given the PR description rather than told there isn't one.
+        -- How long to hold the guide run waiting for `gh pr view` to answer, so
+        -- the chapters are planned against the PR description rather than told
+        -- there isn't one.
         pr_wait = 3000,
         -- Reserve blank display rows below a region when its explanation is
         -- taller than the rows the diff leaves beside it, so the prose is never
         -- squeezed into a gap that a closed fold has collapsed to one line. Blank
         -- virtual lines in both code panes; the file itself is not touched.
         pad = true,
-        -- Cap on the one diff pasted into the prompt (the file you have open).
+        -- Byte budget for the diffs pasted into one run's prompt. Diffs beyond
+        -- it are named instead, and the agent fetches them itself.
         max_diff_bytes = 60000,
     },
     -- Diff pane colours. Vim paints changed lines edge to edge, so the stock
@@ -145,10 +150,10 @@ local defaults = {
         -- keys = { next_file_alt = "]f", ... } if search-repeat matters more.
         next_file_alt = "m",
         prev_file_alt = "n",
-        next_feature = "<S-PageDown>",
-        prev_feature = "<S-PageUp>",
-        next_feature_alt = "M",
-        prev_feature_alt = "N",
+        next_chapter = "<S-PageDown>",
+        prev_chapter = "<S-PageUp>",
+        next_chapter_alt = "M",
+        prev_chapter_alt = "N",
         toggle_viewed = "<End>",
         toggle_explain = "<leader>ge",
         -- Not "m", which is next-file everywhere now.
@@ -177,10 +182,10 @@ local function session_valid()
     return session ~= nil and session.tab and vim.api.nvim_tabpage_is_valid(session.tab)
 end
 
---- The stream picker's rows: each guide stream priced against the actual change,
+--- The chapter picker's rows: each guide chapter priced against the actual change,
 --- so the picker carries real counts rather than whatever the agent said. Paths
 --- the guide names that are not in the change are simply not counted.
-local function feature_rows()
+local function chapter_rows()
     -- The picker and the AI comments come together: both are products of the
     -- same run, and one toggle governs the pair.
     if not (session and session.guide and explain.is_open(session)) then
@@ -191,7 +196,7 @@ local function feature_rows()
         by_path[e.path] = e
     end
     local rows = {}
-    for _, f in ipairs(session.guide.features or {}) do
+    for _, f in ipairs(session.guide.chapters or {}) do
         local n, added, deleted, viewed = 0, 0, 0, 0
         for _, p in ipairs(f.files or {}) do
             local e = by_path[p]
@@ -209,64 +214,64 @@ local function feature_rows()
     return rows
 end
 
---- What the description pane shows follows the stream picker: a stream's summary
+--- What the description pane shows follows the chapter picker: a chapter's summary
 --- while one is selected, the PR itself on "All files".
 local function render_desc()
     if not session_valid() then
         return
     end
     local width = vim.api.nvim_win_get_width(session.desc_win)
-    local f = session.feature and session.guide and session.guide.features[session.feature] or nil
+    local f = session.chapter and session.guide and session.guide.chapters[session.chapter] or nil
     if f then
-        local rows = feature_rows()
+        local rows = chapter_rows()
         markdown.apply(
             session.desc_buf,
-            markdown.render_feature(f, rows and rows[session.feature] or nil, width)
+            markdown.render_chapter(f, rows and rows[session.chapter] or nil, width)
         )
     else
         markdown.apply(session.desc_buf, markdown.render_pr(session.pr, session.branch, width))
     end
 end
 
-local function feature_picker_open()
+local function chapter_picker_open()
     return session ~= nil
-        and session.feature_win ~= nil
-        and vim.api.nvim_win_is_valid(session.feature_win)
+        and session.chapter_win ~= nil
+        and vim.api.nvim_win_is_valid(session.chapter_win)
 end
 
---- Redraw the stream picker and size its window to its content, so the tree
+--- Redraw the chapter picker and size its window to its content, so the tree
 --- below keeps every remaining row.
-local function redraw_features()
-    if not (session_valid() and feature_picker_open()) then
+local function redraw_chapters()
+    if not (session_valid() and chapter_picker_open()) then
         return
     end
-    local rows = feature_rows()
+    local rows = chapter_rows()
     if not rows then
         return
     end
-    session.feature_map = tree.render_features(session.feature_buf, {
-        features = rows,
-        selected = session.feature,
+    session.chapter_map = tree.render_chapters(session.chapter_buf, {
+        chapters = rows,
+        selected = session.chapter,
         width = session.cfg.tree_width,
     })
-    local content = vim.api.nvim_buf_line_count(session.feature_buf)
-    local column = vim.api.nvim_win_get_height(session.feature_win) + vim.api.nvim_win_get_height(session.tree_win)
-    pcall(vim.api.nvim_win_set_height, session.feature_win, math.min(content, math.floor(column / 2)))
+    local content = vim.api.nvim_buf_line_count(session.chapter_buf)
+    local column = vim.api.nvim_win_get_height(session.chapter_win) + vim.api.nvim_win_get_height(session.tree_win)
+    pcall(vim.api.nvim_win_set_height, session.chapter_win, math.min(content, math.floor(column / 2)))
 end
 
-local function close_feature_picker()
-    if session and session.feature_win and vim.api.nvim_win_is_valid(session.feature_win) then
-        pcall(vim.api.nvim_win_close, session.feature_win, true)
+local function close_chapter_picker()
+    if session and session.chapter_win and vim.api.nvim_win_is_valid(session.chapter_win) then
+        pcall(vim.api.nvim_win_close, session.chapter_win, true)
     end
     if session then
-        session.feature_win, session.feature_buf, session.feature_map = nil, nil, nil
+        session.chapter_win, session.chapter_buf, session.chapter_map = nil, nil, nil
     end
 end
 
 --- The picker's own window, between the description and the tree. Created with
 --- the AI comments column and only once a guide exists; both leave together.
-local function open_feature_picker()
-    if not session_valid() or feature_picker_open() or not session.guide then
+local function open_chapter_picker()
+    if not session_valid() or chapter_picker_open() or not session.guide then
         return
     end
     if not vim.api.nvim_win_is_valid(session.tree_win) then
@@ -277,8 +282,8 @@ local function open_feature_picker()
     vim.bo[buf].buftype = "nofile"
     vim.bo[buf].bufhidden = "wipe"
     vim.bo[buf].swapfile = false
-    pcall(vim.api.nvim_buf_set_name, buf, "lgtm://streams")
-    vim.bo[buf].filetype = "lgtm-streams"
+    pcall(vim.api.nvim_buf_set_name, buf, "lgtm://chapters")
+    vim.bo[buf].filetype = "lgtm-chapters"
 
     local prev = vim.api.nvim_get_current_win()
     local win
@@ -299,7 +304,7 @@ local function open_feature_picker()
     -- same mark the explanation column carries.
     -- Nerd-font robot plus md-creation sparkle, then the label in the magenta
     -- wash. A nerd font is already assumed by the devicons in the tree.
-    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# 󰙴 " .. layout.ai_label("STREAMS")
+    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# 󰙴 " .. layout.ai_label("CHAPTERS")
     vim.api.nvim_set_current_win(prev)
 
     -- The session's paging and toggle keys, plus the picker's own selection.
@@ -308,17 +313,17 @@ local function open_feature_picker()
     apply_keys(buf, false)
     vim.keymap.set("n", "<CR>", function()
         local line = vim.api.nvim_win_get_cursor(win)[1]
-        local item = session and session.feature_map and session.feature_map[line]
+        local item = session and session.chapter_map and session.chapter_map[line]
         if item then
-            M._select_feature(item.index ~= 0 and item.index or nil)
+            M._select_chapter(item.index ~= 0 and item.index or nil)
         end
-    end, { buffer = buf, nowait = true, silent = true, desc = "lgtm: select stream" })
+    end, { buffer = buf, nowait = true, silent = true, desc = "lgtm: select chapter" })
     vim.keymap.set("n", "q", function()
         M.close()
     end, { buffer = buf, nowait = true, silent = true, desc = "lgtm: close session" })
 
-    session.feature_win, session.feature_buf = win, buf
-    redraw_features()
+    session.chapter_win, session.chapter_buf = win, buf
+    redraw_chapters()
 end
 
 local function redraw_tree()
@@ -345,7 +350,7 @@ local function redraw_tree()
         end
     end
     -- The picker's viewed stats move with the tree's, so the two redraw as one.
-    redraw_features()
+    redraw_chapters()
 end
 
 local function goto_index(idx, focus_working)
@@ -367,20 +372,20 @@ end
 
 M._goto_index = goto_index
 
---- Select a stream from the guide (nil for "All files"): the tree, paging and
+--- Select a chapter from the guide (nil for "All files"): the tree, paging and
 --- the viewed-advance all narrow to its files, and the description pane swaps to
 --- its summary. The entry tables are shared with `all_entries`, so counts and
 --- viewed marks stay one set of state however the list is filtered.
---- @param idx number|nil index into session.guide.features
+--- @param idx number|nil index into session.guide.chapters
 --- @param opts table|nil `focus` hands focus to the working pane afterwards
---- @return boolean selected false when the stream matched no real files
-local function select_feature(idx, opts)
+--- @return boolean selected false when the chapter matched no real files
+local function select_chapter(idx, opts)
     if not session_valid() then
         return false
     end
     local entries = session.all_entries
     if idx then
-        local f = session.guide and session.guide.features[idx]
+        local f = session.guide and session.guide.chapters[idx]
         if not f then
             return false
         end
@@ -392,12 +397,12 @@ local function select_feature(idx, opts)
             return want[e.path]
         end, session.all_entries)
         if #entries == 0 then
-            notify("no changed files matched this stream")
+            notify("no changed files matched this chapter")
             return false
         end
     end
 
-    session.feature = idx
+    session.chapter = idx
     local current = session.entries[session.index]
     session.entries = entries
     local target = 1
@@ -412,34 +417,34 @@ local function select_feature(idx, opts)
     return true
 end
 
-M._select_feature = select_feature
+M._select_chapter = select_chapter
 
---- Cycle through the picker from any pane: All files → stream 1 → … → stream n,
---- wrapping. Streams that match no real files are stepped over, the same way the
+--- Cycle through the picker from any pane: All files → chapter 1 → … → chapter n,
+--- wrapping. Chapters that match no real files are stepped over, the same way the
 --- picker refuses them.
-local function step_feature(delta)
+local function step_chapter(delta)
     if not session_valid() then
         return
     end
     if not explain.is_open(session) then
-        notify("streams come with the AI comments — toggle them in first")
+        notify("chapters come with the AI comments — toggle them in first")
         return
     end
-    local n = session.guide and #session.guide.features or 0
+    local n = session.guide and #session.guide.chapters or 0
     if n == 0 then
         notify("no reviewer guide yet — it arrives with the run")
         return
     end
-    local cur = session.feature or 0
+    local cur = session.chapter or 0
     for _ = 1, n + 1 do
         cur = (cur + delta) % (n + 1)
-        if select_feature(cur ~= 0 and cur or nil) then
+        if select_chapter(cur ~= 0 and cur or nil) then
             return
         end
     end
 end
 
-M._step_feature = step_feature
+M._step_chapter = step_chapter
 
 --- Exposed for tests and for poking at a live session from :lua.
 function M._session()
@@ -521,12 +526,12 @@ local function toggle_explain(force)
     end
     if explain.is_open(session) then
         explain.close(session)
-        -- The stream picker leaves with the comments. Dropping a live filter
-        -- goes through select_feature so the tree, paging and the description
+        -- The chapter picker leaves with the comments. Dropping a live filter
+        -- goes through select_chapter so the tree, paging and the description
         -- pane all return to the whole PR together.
-        close_feature_picker()
-        if session.feature then
-            select_feature(nil)
+        close_chapter_picker()
+        if session.chapter then
+            select_chapter(nil)
         end
         ruler.update(session)
         return
@@ -536,7 +541,7 @@ local function toggle_explain(force)
     end
     apply_keys(session.explain_buf, false)
     ruler.update(session)
-    open_feature_picker()
+    open_chapter_picker()
     explain.refresh(session, { force = force })
 end
 
@@ -608,7 +613,7 @@ local function close_session(force)
     -- the window or block the tabclose.
     ruler.close(session)
     explain.close(session)
-    close_feature_picker()
+    close_chapter_picker()
     layout.close(session)
     session = nil
 end
@@ -628,10 +633,10 @@ function apply_keys(buf, is_tree)
     map(buf, k.prev_file, function() step(-1) end, "previous changed file")
     map(buf, k.next_file_alt, function() step(1) end, "next changed file")
     map(buf, k.prev_file_alt, function() step(-1) end, "previous changed file")
-    map(buf, k.next_feature, function() step_feature(1) end, "next stream")
-    map(buf, k.prev_feature, function() step_feature(-1) end, "previous stream")
-    map(buf, k.next_feature_alt, function() step_feature(1) end, "next stream")
-    map(buf, k.prev_feature_alt, function() step_feature(-1) end, "previous stream")
+    map(buf, k.next_chapter, function() step_chapter(1) end, "next chapter")
+    map(buf, k.prev_chapter, function() step_chapter(-1) end, "previous chapter")
+    map(buf, k.next_chapter_alt, function() step_chapter(1) end, "next chapter")
+    map(buf, k.prev_chapter_alt, function() step_chapter(-1) end, "previous chapter")
     map(buf, k.toggle_viewed, toggle_viewed, "toggle viewed")
     map(buf, k.toggle_explain, function() toggle_explain(false) end, "toggle the explanation column")
     map(buf, k.close, function() close_session(false) end, "close session")
@@ -715,18 +720,18 @@ function M.open(base_arg, opts)
         branch = branch,
         merge_base = merge_base,
         -- `entries` is what the tree shows and paging walks; `all_entries` is the
-        -- whole change, which is what the explanation run and the stream stats
+        -- whole change, which is what the explanation run and the chapter stats
         -- are always about. Same entry tables in both, so counts and viewed
         -- marks are one set of state.
         entries = entries,
         all_entries = entries,
-        feature = nil,
+        chapter = nil,
         store = store,
         index = 1,
         folded = {},
     })
 
-    -- A guide cached by an earlier run puts the stream picker up immediately;
+    -- A guide cached by an earlier run puts the chapter picker up immediately;
     -- otherwise it appears when the explanation run writes one.
     session.guide = explain.load_guide(session)
     session.guide_json = session.guide and vim.json.encode(session.guide) or nil
@@ -736,19 +741,19 @@ function M.open(base_arg, opts)
         end
         -- The store was cleared: the picker goes, and a live filter with it.
         if not session.guide then
-            close_feature_picker()
-            if session.feature then
-                select_feature(nil)
+            close_chapter_picker()
+            if session.chapter then
+                select_chapter(nil)
             end
             return
         end
         if explain.is_open(session) then
-            open_feature_picker()
+            open_chapter_picker()
         end
-        if session.feature then
-            -- A refined guide may have regrouped or dropped the selected stream;
+        if session.chapter then
+            -- A refined guide may have regrouped or dropped the selected chapter;
             -- reselect so the filter follows it rather than going stale.
-            select_feature(session.feature <= #session.guide.features and session.feature or nil)
+            select_chapter(session.chapter <= #session.guide.chapters and session.chapter or nil)
         else
             redraw_tree()
         end
@@ -889,9 +894,9 @@ function M.open(base_arg, opts)
         -- Kept for the explanation agent, which is given the PR body as the
         -- statement of intent the diff is supposed to deliver.
         session.pr = pr
-        -- Only while the pane is showing the PR: a selected stream keeps its
+        -- Only while the pane is showing the PR: a selected chapter keeps its
         -- summary rather than being interrupted by the network answering.
-        if not session.feature then
+        if not session.chapter then
             render_desc()
         end
     end)

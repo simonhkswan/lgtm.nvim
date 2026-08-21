@@ -64,7 +64,7 @@ local function store_dir(session)
 end
 
 --- The full change. `session.entries` is the list the tree is showing, and a
---- selected stream narrows it — but the run, its progress and its resume list are
+--- selected chapter narrows it — but the run, its progress and its resume list are
 --- always about every file in the PR.
 local function all_entries(session)
     return session.all_entries or session.entries
@@ -99,7 +99,7 @@ function M.clear_store(session)
     session.explain_store = {}
     local n = store.clear(store_dir(session))
     -- The guide is part of the store, so clearing one clears the other; the
-    -- stream picker follows it off the screen.
+    -- chapter picker follows it off the screen.
     if session.guide then
         session.guide, session.guide_json = nil, nil
         if session.on_guide then
@@ -499,7 +499,7 @@ local function set_winbar(session, entry, note)
     end
     local text = table.concat({
         -- The sparkle, then the label in the magenta wash: this pane's content
-        -- is generated, and the same mark sits on the stream picker.
+        -- is generated, and the same mark sits on the chapter picker.
         "%#LgtmWinbarAIIcon# 󰙴 " .. require("lgtm.layout").ai_label("EXPLAIN") .. "  %#LgtmWinbarDim#",
         (name:gsub("%%", "%%%%")),
         "  %=",
@@ -612,8 +612,16 @@ function M.relayout_if_stale(session)
 end
 
 -- ---------------------------------------------------------------------------
--- The run
+-- The runs
+--
+-- Phased. A fast guide run plans the chapters; then one run per chapter, in
+-- parallel up to `max_parallel`, each given its chapter and its files' diffs
+-- pasted into the prompt; then one final run for the files no chapter claimed,
+-- once the chapters are done. Small prompts, chapter-aware comments, and the
+-- chapters overlap in time instead of queueing behind one another.
 -- ---------------------------------------------------------------------------
+
+local schedule_runs, pump, launch
 
 local function stop_timer(session)
     if session.explain_timer then
@@ -625,64 +633,290 @@ local function stop_timer(session)
     end
 end
 
---- Stop the run. Called when the session closes, not when the reviewer pages: a
---- whole-PR run is doing work for every file, so paging away from the one that
---- started it is not a reason to throw the rest of it away.
+--- Stop every run and drop the queue. Called when the session closes, not when
+--- the reviewer pages: the runs are doing work for every file, so paging away
+--- from the one that started them is not a reason to throw the rest away.
 local function stop_run(session)
     stop_timer(session)
-    if session.explain_job then
+    for _, job in pairs(session.explain_jobs or {}) do
         pcall(function()
-            session.explain_job:kill(15)
+            job:kill(15)
         end)
-        session.explain_job = nil
     end
+    session.explain_jobs = {}
+    session.explain_queue = {}
 end
 
 M.stop_run = stop_run
 
+local function running(session)
+    local n = 0
+    for _ in pairs(session.explain_jobs or {}) do
+        n = n + 1
+    end
+    return n
+end
+
+--- Is a spec with this key already running or waiting for a slot?
+local function scheduled(session, key)
+    if (session.explain_jobs or {})[key] then
+        return true
+    end
+    for _, s in ipairs(session.explain_queue or {}) do
+        if s.key == key then
+            return true
+        end
+    end
+    return false
+end
+
 local function render_progress(session, entry)
     local done, total = progress(session)
+    local active = running(session)
     local secs = session.explain_started and math.floor((vim.uv.now() - session.explain_started) / 1000) or 0
-    local note = session.explain_job
-        and string.format("%d of %d files · %ds", done, total, secs)
+    local note = active > 0
+        and string.format("%d of %d files · %d run%s · %ds", done, total, active, active == 1 and "" or "s", secs)
         or string.format("%d of %d files", done, total)
     render_status(
         session,
         "generating…",
         note
-            .. "\n\nOne agent is explaining the whole change, so each file is written with the"
-            .. " rest of it in view. Files appear here as it finishes them — this one is"
-            .. " being done first."
+            .. "\n\nThe change is explained a chapter at a time, in parallel, each agent"
+            .. " with its chapter's diffs in hand. Files appear here as they finish —"
+            .. " this one's chapter runs first."
     )
     set_winbar(session, entry, note)
 end
 
---- Start the agent if there is work outstanding and nothing already running.
---- @param opts table|nil `only` regenerates just those paths
+local function entry_by_path(session)
+    local map = {}
+    for _, e in ipairs(all_entries(session)) do
+        map[e.path] = e
+    end
+    return map
+end
+
+--- Launch one spec now: build its prompt and start its process.
+--- spec = { key, kind = "guide"|"explain", chapter, paths, only, current,
+---          after_all }
+function launch(session, spec)
+    local cfg = session.cfg.explain
+    local dir = store_dir(session)
+    vim.fn.mkdir(dir, "p")
+
+    local ctx = {
+        pr = session.pr,
+        branch = session.branch,
+        base_ref = session.base_ref,
+        merge_base = session.merge_base,
+        entries = all_entries(session),
+        out_dir = dir,
+    }
+
+    local prompt, contract
+    if spec.kind == "guide" then
+        prompt, contract = ai.build_guide_prompt(ctx), ai.GUIDE_CONTRACT
+    else
+        local by_path = entry_by_path(session)
+        local diffs = {}
+        for _, p in ipairs(spec.paths or {}) do
+            local e = by_path[p]
+            if e then
+                diffs[p] = git.file_diff(session.merge_base, e, session.root) or ""
+            end
+        end
+        ctx.chapter = spec.chapter
+        ctx.paths = spec.paths
+        ctx.diffs = diffs
+        ctx.current = spec.current
+        ctx.only = spec.only
+        ctx.budget = cfg.max_diff_bytes
+        prompt, contract = ai.build_explain_prompt(ctx), ai.EXPLAIN_CONTRACT
+    end
+
+    session.explain_started = session.explain_started or vim.uv.now()
+    local job = ai.run(prompt, contract, { repo = session.root, out = dir }, cfg, function(ok, err)
+        if session.explain_jobs then
+            session.explain_jobs[spec.key] = nil
+        end
+        if not M.is_open(session) then
+            return
+        end
+        -- The results are files, so a failed run is not necessarily an empty
+        -- one: whatever it wrote before dying is still there and still good.
+        M.reload(session)
+        if not ok then
+            vim.notify(string.format("lgtm: the %s run ended early (%s)", spec.key, err), vim.log.levels.WARN)
+        end
+        -- The guide unlocking the chapters is normally caught by the directory
+        -- watcher the moment guide.json lands; this is the backstop.
+        if spec.kind == "guide" and session.guide then
+            schedule_runs(session)
+        end
+        pump(session)
+        if running(session) == 0 and #(session.explain_queue or {}) == 0 then
+            stop_timer(session)
+        end
+    end)
+
+    if job then
+        session.explain_jobs[spec.key] = job
+    end
+
+    if not session.explain_timer and running(session) > 0 then
+        local timer = vim.uv.new_timer()
+        session.explain_timer = timer
+        timer:start(1000, 1000, vim.schedule_wrap(function()
+            if not (M.is_open(session) and running(session) > 0) then
+                return
+            end
+            local e = session.entries[session.index]
+            if e and not (session.explain_store or {})[e.path] then
+                render_progress(session, e)
+            end
+        end))
+    end
+end
+
+--- Start queued specs while slots are free. The leftover run is held back until
+--- it is the only thing left: its files are the ones no chapter claimed, and
+--- "after the chapters" is part of its meaning.
+function pump(session)
+    if not M.is_open(session) then
+        return
+    end
+    local cap = session.cfg.explain.max_parallel or 3
+    local queue = session.explain_queue or {}
+    local i = 1
+    while i <= #queue and running(session) < cap do
+        local spec = queue[i]
+        if spec.after_all and (running(session) > 0 or #queue > 1) then
+            i = i + 1
+        else
+            table.remove(queue, i)
+            launch(session, spec)
+        end
+    end
+end
+
+--- Work out which runs the change still needs and queue them: the guide first,
+--- then a run per chapter with unexplained files (the current file's chapter at
+--- the front), then the leftovers.
+function schedule_runs(session)
+    if not M.is_open(session) then
+        return
+    end
+    session.explain_jobs = session.explain_jobs or {}
+    session.explain_queue = session.explain_queue or {}
+    session.explain_store = session.explain_store or store.load(store_dir(session))
+
+    if not session.guide then
+        if not scheduled(session, "guide") then
+            table.insert(session.explain_queue, { key = "guide", kind = "guide" })
+        end
+        pump(session)
+        return
+    end
+
+    local by_path = entry_by_path(session)
+    local current = session.entries[session.index]
+    local chapters = session.guide.chapters or {}
+
+    -- The chapter holding the open file goes first: its explanation is the one
+    -- being waited on.
+    local order = {}
+    for i, ch in ipairs(chapters) do
+        if current and vim.tbl_contains(ch.files or {}, current.path) then
+            table.insert(order, 1, i)
+        else
+            table.insert(order, i)
+        end
+    end
+
+    local claimed = {}
+    for _, i in ipairs(order) do
+        local ch = chapters[i]
+        local todo = {}
+        for _, p in ipairs(ch.files or {}) do
+            claimed[p] = true
+            if by_path[p] and not session.explain_store[p] then
+                table.insert(todo, p)
+            end
+        end
+        local key = "chapter " .. i
+        if #todo > 0 and not scheduled(session, key) then
+            table.insert(session.explain_queue, {
+                key = key,
+                kind = "explain",
+                chapter = ch,
+                paths = todo,
+                current = (current and vim.tbl_contains(todo, current.path)) and current.path or nil,
+            })
+        end
+    end
+
+    local rest = {}
+    for _, e in ipairs(all_entries(session)) do
+        if not claimed[e.path] and not session.explain_store[e.path] then
+            table.insert(rest, e.path)
+        end
+    end
+    if #rest > 0 and not scheduled(session, "leftover") then
+        table.insert(session.explain_queue, {
+            key = "leftover",
+            kind = "explain",
+            paths = rest,
+            after_all = true,
+            current = (current and vim.tbl_contains(rest, current.path)) and current.path or nil,
+        })
+    end
+
+    pump(session)
+end
+
+--- Queue whatever the change still needs.
+--- @param opts table|nil `only` regenerates just those paths, as its own small
+---        run — displacing nothing, unlike the single-run design it replaces.
 local function ensure_run(session, opts)
     opts = opts or {}
     local cfg = session.cfg.explain
+    session.explain_jobs = session.explain_jobs or {}
+    session.explain_queue = session.explain_queue or {}
 
-    if session.explain_job then
-        if not opts.only then
-            -- A full run is already covering this file. Waiting is the whole point.
+    if opts.only then
+        local key = "regenerate " .. table.concat(opts.only, " ")
+        if scheduled(session, key) then
             return
         end
-        -- A targeted regeneration displaces it. Everything already written stays on
-        -- disk, and relaunching later resumes from there.
-        stop_run(session)
+        local chapter
+        for _, ch in ipairs(session.guide and session.guide.chapters or {}) do
+            if vim.tbl_contains(ch.files or {}, opts.only[1]) then
+                chapter = ch
+                break
+            end
+        end
+        -- Front of the queue: a regeneration was asked for by hand.
+        table.insert(session.explain_queue, 1, {
+            key = key,
+            kind = "explain",
+            paths = opts.only,
+            only = true,
+            chapter = chapter,
+            current = opts.only[1],
+        })
+        pump(session)
+        return
     end
 
-    local todo = opts.only or outstanding(session)
-    if #todo == 0 then
+    if #outstanding(session) == 0 then
         return
     end
 
     -- `session.pr` is nil while the gh lookup is in flight and false once it has
     -- answered that there is no PR. Worth a short wait for the difference: the
-    -- description is the statement of intent the entire run is written against, and
-    -- unlike the per-file design there is no second chance at it.
-    if session.pr == nil and (session.explain_pr_waited or 0) < (cfg.pr_wait or 3000) then
+    -- description is the statement of intent the guide is planned against, and
+    -- every later run inherits its chapters.
+    if session.guide == nil and session.pr == nil and (session.explain_pr_waited or 0) < (cfg.pr_wait or 3000) then
         session.explain_pr_waited = (session.explain_pr_waited or 0) + 300
         vim.defer_fn(function()
             if M.is_open(session) then
@@ -692,74 +926,7 @@ local function ensure_run(session, opts)
         return
     end
 
-    local dir = store_dir(session)
-    vim.fn.mkdir(dir, "p")
-    local entry = session.entries[session.index]
-    local done = {}
-    if not opts.only then
-        for path in pairs(session.explain_store or {}) do
-            table.insert(done, path)
-        end
-    end
-
-    -- Only the open file's diff is pasted in; the rest the agent fetches itself.
-    local current_diff
-    if entry then
-        current_diff = git.file_diff(session.merge_base, entry, session.root) or ""
-        local cap = cfg.max_diff_bytes or 60000
-        if #current_diff > cap then
-            current_diff = current_diff:sub(1, cap) .. "\n[diff truncated at " .. cap .. " bytes]\n"
-        end
-    end
-
-    local prompt = ai.build_prompt({
-        pr = session.pr,
-        current_diff = current_diff,
-        branch = session.branch,
-        base_ref = session.base_ref,
-        merge_base = session.merge_base,
-        entries = all_entries(session),
-        current = entry and entry.path or nil,
-        out_dir = dir,
-        done = done,
-        guide_done = session.guide ~= nil,
-        only = opts.only,
-    })
-
-    session.explain_started = vim.uv.now()
-    session.explain_job = ai.run(prompt, { repo = session.root, out = dir }, cfg, function(ok, err)
-        stop_timer(session)
-        session.explain_job = nil
-        if not M.is_open(session) then
-            return
-        end
-        -- The results are files, so a failed run is not necessarily an empty one:
-        -- whatever it wrote before dying is still there and still good.
-        M.reload(session)
-        if not ok then
-            local left = #outstanding(session)
-            if left > 0 then
-                vim.notify(
-                    string.format("lgtm: the explanation run ended early (%s), %d file(s) unexplained", err, left),
-                    vim.log.levels.WARN
-                )
-            end
-        end
-    end)
-
-    if session.explain_job then
-        local timer = vim.uv.new_timer()
-        session.explain_timer = timer
-        timer:start(1000, 1000, vim.schedule_wrap(function()
-            if not (M.is_open(session) and session.explain_job) then
-                return
-            end
-            local e = session.entries[session.index]
-            if e and not (session.explain_store or {})[e.path] then
-                render_progress(session, e)
-            end
-        end))
-    end
+    schedule_runs(session)
 end
 
 --- Re-read the store and show the current file if its explanation has arrived.
@@ -782,6 +949,10 @@ function M.reload(session)
             if session.on_guide then
                 session.on_guide()
             end
+            -- The guide unlocks the chapter runs the moment it lands — this is
+            -- what makes the phases overlap instead of waiting for the guide
+            -- run's process to exit.
+            schedule_runs(session)
         end
     end
     local entry = session.entries[session.index]

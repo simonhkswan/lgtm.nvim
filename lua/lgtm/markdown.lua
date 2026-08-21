@@ -449,15 +449,15 @@ function M.render_pr(pr, branch, width, note)
     return lines, marks
 end
 
---- Lay out one stream of the reviewer guide: its one-line title, its stats, then
+--- Lay out one chapter of the reviewer guide: its one-line title, its stats, then
 --- its summary — the same shape render_pr gives the PR itself, so switching
---- streams reads as the pane changing subject rather than changing form.
---- @param feature table { title, summary }
+--- chapters reads as the pane changing subject rather than changing form.
+--- @param chapter table { title, summary }
 --- @param stats table|nil { files, added, deleted, viewed }
 --- @return table lines, table marks
-function M.render_feature(feature, stats, width)
+function M.render_chapter(chapter, stats, width)
     local lines, marks = {}, {}
-    for _, l in ipairs(M.wrap(feature.title or "", width - 2)) do
+    for _, l in ipairs(M.wrap(chapter.title or "", width - 2)) do
         table.insert(lines, l)
         table.insert(marks, { line = #lines - 1, hl = "LgtmMdH1" })
     end
@@ -477,7 +477,7 @@ function M.render_feature(feature, stats, width)
     end
     table.insert(lines, "")
 
-    local body_lines, body_marks = M.format(feature.summary or "", width)
+    local body_lines, body_marks = M.format(chapter.summary or "", width)
     local offset = #lines
     vim.list_extend(lines, body_lines)
     for _, m in ipairs(body_marks) do
