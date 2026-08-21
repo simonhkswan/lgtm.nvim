@@ -181,14 +181,6 @@ function M.accent(kind, opts)
     -- so these are built from the hue rather than from the pane tints.
     return to_hex(hsl_to_rgb((s.hue % 360) / 360, 0.45, math.min(0.78, bg_l + 0.45)))
 end
-
---- A legible foreground at an arbitrary hue, clearing the background the same
---- way accent() does — for labels rather than diff counts.
-function M.fg(hue, sat, opts)
-    local _, _, bg_l = rgb_to_hsl(normal_bg(opts))
-    return to_hex(hsl_to_rgb((hue % 360) / 360, sat, math.min(0.78, bg_l + 0.45)))
-end
-
 --- Apply the palette. Each window gets its own namespace so the base pane can
 --- read as removals and the working pane as additions, and so the rest of
 --- Neovim's diffs keep the colourscheme's own styling.
