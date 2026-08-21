@@ -948,6 +948,13 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("LgtmPick", function()
         require("lgtm.picker").open({ base_branch = M.config.base_branch })
     end, { desc = "Pick a branch to review" })
+
+    vim.api.nvim_create_user_command("LgtmPr", function(args)
+        require("lgtm.picker").open_pr(args.args ~= "" and args.args or nil)
+    end, {
+        nargs = "?",
+        desc = "Review a GitHub PR — a number checks its branch out directly, no argument picks from open PRs",
+    })
 end
 
 return M

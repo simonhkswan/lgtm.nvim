@@ -25,7 +25,7 @@ With [lazy.nvim](https://github.com/folke/lazy.nvim):
         "nvim-tree/nvim-web-devicons",       -- optional: file icons in the tree
         "nvim-telescope/telescope.nvim",     -- optional: only for :LgtmPick
     },
-    cmd = { "LgtmEdit", "LgtmClose", "LgtmPick", "LgtmExplain" },
+    cmd = { "LgtmEdit", "LgtmClose", "LgtmPick", "LgtmPr", "LgtmExplain" },
     keys = { { "<leader>gd", "<cmd>LgtmEdit<CR>", desc = "PR diff review" } },
     config = function()
         require("lgtm").setup({})
@@ -167,6 +167,19 @@ branch's changed files (with your viewed progress) previewed beside it.
 `<CR>` opens the review — in the branch's worktree if it has one, otherwise
 checking it out where you are. It refuses rather than touching uncommitted
 work.
+
+## Reviewing a PR that is not local yet
+
+```
+:LgtmPr 1234      fetch that PR's branch and open the review
+:LgtmPr           pick from the repository's open PRs
+```
+
+For when someone asks "can you check my branch?". The bare form lists open
+PRs (searchable by number, title, branch, and author, with the PR body as the
+preview); either form runs `gh pr checkout` — fork PRs included — and opens
+the review. Requires `gh`, refuses over uncommitted work, and reuses an
+existing worktree or checkout when the branch is already local.
 
 ## Options
 

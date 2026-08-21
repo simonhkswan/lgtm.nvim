@@ -349,6 +349,34 @@ function M.open(opts)
         :find()
 end
 
+--- Checking out across uncommitted work either fails or drags it along, so
+--- stop and say what is in the way rather than deciding for them.
+--- @return boolean true when the checkout must not proceed
+local function refuse_if_dirty(root, what)
+    local dirty = git.dirty_files(root)
+    if #dirty == 0 then
+        return false
+    end
+    local shown = {}
+    for i = 1, math.min(5, #dirty) do
+        table.insert(shown, "    " .. dirty[i])
+    end
+    if #dirty > 5 then
+        table.insert(shown, string.format("    …and %d more", #dirty - 5))
+    end
+    notify(
+        string.format(
+            "cannot check out %s — %d file%s modified\n%s\n  commit or stash, then try again",
+            what,
+            #dirty,
+            #dirty == 1 and "" or "s",
+            table.concat(shown, "\n")
+        ),
+        vim.log.levels.WARN
+    )
+    return true
+end
+
 --- Open the diff view for a chosen branch: switch to its worktree if it has one,
 --- otherwise check it out where we are.
 function M.open_branch(entry, root)
@@ -364,27 +392,7 @@ function M.open_branch(entry, root)
         return
     end
 
-    -- Checking out across uncommitted work either fails or drags it along, so
-    -- stop and say what is in the way rather than deciding for them.
-    local dirty = git.dirty_files(root)
-    if #dirty > 0 then
-        local shown = {}
-        for i = 1, math.min(5, #dirty) do
-            table.insert(shown, "    " .. dirty[i])
-        end
-        if #dirty > 5 then
-            table.insert(shown, string.format("    …and %d more", #dirty - 5))
-        end
-        notify(
-            string.format(
-                "cannot check out %s — %d file%s modified\n%s\n  commit or stash, then try again",
-                entry.name,
-                #dirty,
-                #dirty == 1 and "" or "s",
-                table.concat(shown, "\n")
-            ),
-            vim.log.levels.WARN
-        )
+    if refuse_if_dirty(root, entry.name) then
         return
     end
 
@@ -395,6 +403,186 @@ function M.open_branch(entry, root)
     end
     notify("checked out " .. entry.name)
     lgtm.open(nil, { cwd = root })
+end
+
+--- Get a PR's branch local and open the review: the branch's worktree if it has
+--- one, the current checkout if it is already there, otherwise `gh pr checkout`
+--- — which fetches fork branches too.
+function M.checkout_pr(pr, root)
+    local lgtm = require("lgtm")
+    local head = pr.headRefName
+
+    if head then
+        local wt = git.worktrees(root)[head]
+        if wt then
+            lgtm.open(nil, { cwd = wt })
+            return
+        end
+        if git.branch(root) == head then
+            lgtm.open(nil, { cwd = root })
+            return
+        end
+    end
+
+    if refuse_if_dirty(root, string.format("PR #%s", pr.number)) then
+        return
+    end
+
+    notify(string.format("checking out PR #%s (%s)…", pr.number, head or "?"))
+    git.pr_checkout(pr.number, root, function(ok, err)
+        if not ok then
+            notify("gh pr checkout failed: " .. (err ~= "" and err or "unknown error"), vim.log.levels.ERROR)
+            return
+        end
+        notify("checked out " .. (head or ("PR #" .. pr.number)))
+        lgtm.open(nil, { cwd = root })
+    end)
+end
+
+--- Review a PR that may not be local yet. With a number, fetch that PR and open
+--- it directly; without one, a picker over the repository's open PRs, searchable
+--- by number, title, branch and author. Deliberately gh-backed and on demand —
+--- the branch picker stays local-only.
+function M.open_pr(number, opts)
+    opts = opts or {}
+    local cwd = opts.cwd or vim.fn.getcwd()
+    local root = git.root(cwd)
+    if not root then
+        notify("not inside a git repository", vim.log.levels.ERROR)
+        return
+    end
+    if vim.fn.executable("gh") ~= 1 or vim.env.LGTM_NO_GH then
+        notify("reviewing PRs from GitHub needs the GitHub CLI (gh)", vim.log.levels.ERROR)
+        return
+    end
+
+    if number then
+        notify("fetching PR #" .. number .. "…")
+        git.pr_by_number(number, root, function(pr, err)
+            if not pr then
+                notify("could not fetch PR #" .. number .. (err and (": " .. err) or ""), vim.log.levels.WARN)
+                return
+            end
+            M.checkout_pr(pr, root)
+        end)
+        return
+    end
+
+    local ok_telescope = pcall(require, "telescope")
+    if not ok_telescope then
+        notify("telescope.nvim is not available — use :LgtmPr <number> instead", vim.log.levels.ERROR)
+        return
+    end
+
+    notify("fetching open PRs…")
+    git.pr_list(root, function(prs, err)
+        if not prs then
+            notify(err or "gh pr list failed", vim.log.levels.WARN)
+            return
+        end
+        if #prs == 0 then
+            notify("no open PRs")
+            return
+        end
+
+        local pickers = require("telescope.pickers")
+        local finders = require("telescope.finders")
+        local conf = require("telescope.config").values
+        local actions = require("telescope.actions")
+        local action_state = require("telescope.actions.state")
+        local previewers = require("telescope.previewers")
+
+        markdown.setup_highlights(opts.diff_colors or require("lgtm").config.diff_colors)
+
+        -- The list rows are deliberately light (see git.pr_list); the body and
+        -- the diff stats are fetched here, per highlighted PR, and memoised so
+        -- arrowing back to a row costs nothing.
+        local full = {}
+        local previewer = previewers.new_buffer_previewer({
+            title = "Pull request",
+            get_buffer_by_name = function(_, entry)
+                return tostring(entry.value.number)
+            end,
+            define_preview = function(self, entry)
+                local number = entry.value.number
+                local buf, win = self.state.bufnr, self.state.winid
+                vim.bo[buf].filetype = "lgtm-pr"
+                if win and vim.api.nvim_win_is_valid(win) then
+                    vim.wo[win].wrap = true
+                    vim.wo[win].linebreak = true
+                    vim.wo[win].breakindent = true
+                end
+                local width = (win and vim.api.nvim_win_is_valid(win)) and vim.api.nvim_win_get_width(win) or 80
+                local function draw(pr)
+                    if buf and vim.api.nvim_buf_is_valid(buf) then
+                        markdown.apply(buf, markdown.render_pr(pr, entry.value.headRefName or "?", width))
+                    end
+                end
+                if full[number] then
+                    draw(full[number])
+                    return
+                end
+                -- nil renders the "loading…" placeholder.
+                draw(nil)
+                git.pr_by_number(number, root, function(pr)
+                    if not pr then
+                        return
+                    end
+                    full[number] = pr
+                    -- The selection may have moved on while gh was out.
+                    local sel = action_state.get_selected_entry()
+                    if sel and sel.value.number == number then
+                        draw(pr)
+                    end
+                end)
+            end,
+        })
+
+        pickers
+            .new({}, {
+                prompt_title = "Open pull requests",
+                finder = finders.new_table({
+                    results = prs,
+                    entry_maker = function(pr)
+                        local author = pr.author and pr.author.login or ""
+                        local display = string.format(
+                            "%s#%-5s %-56s %s",
+                            pr.isDraft and "◌ " or "",
+                            tostring(pr.number),
+                            (pr.title or ""):sub(1, 56),
+                            author
+                        )
+                        return {
+                            value = pr,
+                            display = display,
+                            -- Number, title, branch and author are all searchable,
+                            -- so "check out my branch" works from any of them.
+                            ordinal = string.format(
+                                "%s %s %s %s",
+                                tostring(pr.number),
+                                pr.title or "",
+                                pr.headRefName or "",
+                                author
+                            ),
+                        }
+                    end,
+                }),
+                sorter = conf.generic_sorter({}),
+                previewer = previewer,
+                attach_mappings = function(prompt_bufnr)
+                    actions.select_default:replace(function()
+                        local entry = action_state.get_selected_entry()
+                        if not entry then
+                            return
+                        end
+                        actions.close(prompt_bufnr)
+                        M.checkout_pr(entry.value, root)
+                    end)
+                    return true
+                end,
+            })
+            :find()
+    end)
 end
 
 return M

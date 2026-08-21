@@ -147,6 +147,74 @@ function M.pr_view(branch, cwd, cb)
     end)
 end
 
+--- Open PRs on the repository, fetched asynchronously. Calls back with a list
+--- of decoded PRs, or (nil, why) when gh cannot answer.
+---
+--- Deliberately light: only the fields a picker row needs. A repository can
+--- have a lot of open PRs, and 50 full bodies with diff stats is a heavy answer
+--- to a question whose display is one line each. The full PR is fetched per
+--- selection instead, by the previewer.
+function M.pr_list(cwd, cb)
+    if vim.fn.executable("gh") ~= 1 or vim.env.LGTM_NO_GH then
+        vim.schedule(function()
+            cb(nil, "the GitHub CLI (gh) is not available")
+        end)
+        return
+    end
+    vim.system(
+        { "gh", "pr", "list", "--limit", "50", "--json", "number,title,headRefName,author,isDraft" },
+        { cwd = cwd, text = true },
+        function(res)
+            vim.schedule(function()
+                if res.code ~= 0 then
+                    cb(nil, vim.trim(res.stderr or "gh pr list failed"))
+                    return
+                end
+                local ok, decoded = pcall(vim.json.decode, res.stdout or "")
+                if ok and type(decoded) == "table" then
+                    cb(decoded)
+                else
+                    cb(nil, "could not parse gh output")
+                end
+            end)
+        end
+    )
+end
+
+--- One PR by number, asynchronously.
+function M.pr_by_number(number, cwd, cb)
+    if vim.fn.executable("gh") ~= 1 or vim.env.LGTM_NO_GH then
+        vim.schedule(function()
+            cb(nil, "the GitHub CLI (gh) is not available")
+        end)
+        return
+    end
+    vim.system(
+        { "gh", "pr", "view", tostring(number), "--json", PR_FIELDS .. ",headRefName" },
+        { cwd = cwd, text = true },
+        function(res)
+            vim.schedule(function()
+                if res.code ~= 0 then
+                    cb(nil, vim.trim(res.stderr or "gh pr view failed"))
+                    return
+                end
+                local ok, decoded = pcall(vim.json.decode, res.stdout or "")
+                cb(ok and type(decoded) == "table" and decoded or nil, ok and nil or "could not parse gh output")
+            end)
+        end
+    )
+end
+
+--- `gh pr checkout`: fetches the PR's branch — fork PRs included — and checks
+--- it out, which is what makes a teammate's PR reviewable locally in one step.
+function M.pr_checkout(number, cwd, cb)
+    vim.system({ "gh", "pr", "checkout", tostring(number) }, { cwd = cwd, text = true }, function(res)
+        vim.schedule(function()
+            cb(res.code == 0, vim.trim(res.stderr or ""))
+        end)
+    end)
+end
+
 function M.checkout(branch, cwd)
     local res = vim.system({ "git", "checkout", branch }, { cwd = cwd, text = true }):wait()
     if res.code ~= 0 then
