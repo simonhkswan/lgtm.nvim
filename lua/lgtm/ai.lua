@@ -311,63 +311,66 @@ end
 
 --- Attach the agent's line-range explanations to the plugin's regions.
 ---
---- By best overlap, with a small slack for a citation that lands just off the end of
---- a block. Regions that come out on the same explanation become a group, stated
---- once on the first of them — which is how "one change made in three places" reads
---- as one piece of text rather than three copies.
---- @return table map region index -> { title, body, group = {indices}, lead = bool }
+--- Every explanation lands on every region it overlaps, so a region cited by
+--- more than one reading — a file shared between chapters, or two agents seeing
+--- the same lines — shows them stacked rather than one silently winning. A
+--- citation that misses every region by a few lines still lands, on its closest
+--- region. Regions that share an explanation are a group: its text is stated
+--- once, on the first of them, and the others point back at it — which is how
+--- "one change made in three places" reads as one piece of text.
+--- @return table map region index -> list of { title, body, group, lead }
 function M.map_to_regions(explanations, regions, slack)
     slack = slack or 3
-    local chosen = {}
-    for i, r in ipairs(regions or {}) do
-        local best, best_score
-        for j, e in ipairs(explanations or {}) do
-            local s = tonumber(e.start) or tonumber(e["from"])
-            local fin = tonumber(e["end"]) or s
-            if s then
-                if fin < s then
-                    s, fin = fin, s
+    local hits, groups = {}, {}
+    for j, e in ipairs(explanations or {}) do
+        local s = tonumber(e.start) or tonumber(e["from"])
+        local fin = tonumber(e["end"]) or s
+        if s then
+            if fin < s then
+                s, fin = fin, s
+            end
+            local landed = false
+            for i, r in ipairs(regions or {}) do
+                if overlap(r, s, fin) > 0 then
+                    hits[i] = hits[i] or {}
+                    table.insert(hits[i], j)
+                    groups[j] = groups[j] or {}
+                    table.insert(groups[j], i)
+                    landed = true
                 end
-                local score = overlap(r, s, fin)
-                if score <= 0 then
-                    -- Near miss: treat proximity as a weak match so a citation
-                    -- that is a line or two out still lands.
+            end
+            if not landed then
+                local best, best_gap
+                for i, r in ipairs(regions or {}) do
                     local gap = math.max(s - r.last, r.first - fin)
-                    if gap <= slack then
-                        score = -gap
-                    else
-                        score = nil
+                    if gap <= slack and (best_gap == nil or gap < best_gap) then
+                        best, best_gap = i, gap
                     end
                 end
-                if score and (best_score == nil or score > best_score) then
-                    best, best_score = j, score
+                if best then
+                    hits[best] = hits[best] or {}
+                    table.insert(hits[best], j)
+                    groups[j] = groups[j] or {}
+                    table.insert(groups[j], best)
                 end
             end
         end
-        if best then
-            chosen[i] = best
-        end
     end
-
-    local groups = {}
-    for i = 1, #(regions or {}) do
-        local j = chosen[i]
-        if j then
-            groups[j] = groups[j] or {}
-            table.insert(groups[j], i)
-        end
+    for _, members in pairs(groups) do
+        table.sort(members)
     end
 
     local out = {}
-    for j, members in pairs(groups) do
-        local e = explanations[j]
-        for rank, i in ipairs(members) do
-            out[i] = {
+    for i, list in pairs(hits) do
+        out[i] = {}
+        for _, j in ipairs(list) do
+            local e = explanations[j]
+            table.insert(out[i], {
                 title = type(e.title) == "string" and vim.trim(e.title) or "",
                 body = type(e.body) == "string" and vim.trim(e.body) or "",
-                group = members,
-                lead = rank == 1,
-            }
+                group = groups[j],
+                lead = groups[j][1] == i,
+            })
         end
     end
     return out

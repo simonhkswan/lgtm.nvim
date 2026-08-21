@@ -347,36 +347,48 @@ local function build_blocks(session, by_region, width)
             hl = "LgtmExplainDel",
         })
 
-        local e = by_region and by_region[i]
-        if not e then
+        -- A region may carry several readings — a file shared between chapters
+        -- is explained by each — and they are stacked, a blank line apart.
+        local items = by_region and by_region[i] or nil
+        if not items or #items == 0 then
             emit("    …", "LgtmExplainMeta", 0, 5)
-        elseif not e.lead then
-            local lead = session.explain_regions[e.group[1]]
-            emit("    ↑ one change with " .. span_label(lead.first, lead.last, lead.added), "LgtmExplainMeta")
         else
-            if e.title ~= "" then
-                for _, l in ipairs(markdown.wrap(e.title, text_width, "  ")) do
-                    emit(l, "LgtmExplainTitle")
+            for k, e in ipairs(items) do
+                if k > 1 then
+                    table.insert(lines, "")
                 end
-            end
-            -- Two spaces of lead on every body line: markdown.format takes a line's
-            -- own indent as the indent for its wrapped continuations, so this is how
-            -- a bullet's second line lands under its text.
-            local indented = {}
-            for _, l in ipairs(vim.split(e.body, "\n", { plain = true })) do
-                table.insert(indented, "  " .. l)
-            end
-            local body_lines, body_marks = markdown.format(table.concat(indented, "\n"), text_width)
-            local offset = #lines
-            vim.list_extend(lines, body_lines)
-            for _, m in ipairs(body_marks) do
-                table.insert(marks, {
-                    line = m.line + offset,
-                    col = m.col,
-                    end_col = m.end_col,
-                    hl = m.hl,
-                    eol = m.eol,
-                })
+                if not e.lead then
+                    local lead = session.explain_regions[e.group[1]]
+                    emit(
+                        "    ↑ one change with " .. span_label(lead.first, lead.last, lead.added),
+                        "LgtmExplainMeta"
+                    )
+                else
+                    if e.title ~= "" then
+                        for _, l in ipairs(markdown.wrap(e.title, text_width, "  ")) do
+                            emit(l, "LgtmExplainTitle")
+                        end
+                    end
+                    -- Two spaces of lead on every body line: markdown.format takes a
+                    -- line's own indent as the indent for its wrapped continuations,
+                    -- so this is how a bullet's second line lands under its text.
+                    local indented = {}
+                    for _, l in ipairs(vim.split(e.body, "\n", { plain = true })) do
+                        table.insert(indented, "  " .. l)
+                    end
+                    local body_lines, body_marks = markdown.format(table.concat(indented, "\n"), text_width)
+                    local offset = #lines
+                    vim.list_extend(lines, body_lines)
+                    for _, m in ipairs(body_marks) do
+                        table.insert(marks, {
+                            line = m.line + offset,
+                            col = m.col,
+                            end_col = m.end_col,
+                            hl = m.hl,
+                            eol = m.eol,
+                        })
+                    end
+                end
             end
         end
 
