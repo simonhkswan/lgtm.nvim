@@ -94,10 +94,18 @@ function M.create(cfg)
     local tree_buf = scratch("lgtm://tree")
     vim.api.nvim_win_set_buf(tree_win, tree_buf)
     vim.api.nvim_win_set_width(tree_win, cfg.tree_width or 35)
+    -- Fixed now rather than with the other tree options below: resizing the
+    -- base pane next must not steal columns back from the tree.
+    vim.wo[tree_win].winfixwidth = true
     -- Left column plus base width comes straight out of the working pane, which
-    -- is the one being edited. Leave it unset to split the remainder evenly.
+    -- is the one being edited. Leave it unset to split the remainder evenly —
+    -- which has to be asserted: resizing the tree hands its spare columns to
+    -- the base pane alone, so the two code panes come out uneven on their own.
     if cfg.base_width then
         vim.api.nvim_win_set_width(base_win, cfg.base_width)
+    else
+        local rem = vim.api.nvim_win_get_width(base_win) + vim.api.nvim_win_get_width(working_win)
+        vim.api.nvim_win_set_width(base_win, math.floor(rem / 2))
     end
 
     -- The left column is split the same way the branch picker splits its right
