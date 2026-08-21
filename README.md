@@ -71,16 +71,20 @@ pass one explicitly: `:LgtmEdit origin/release-2`.
 
 | Key | Where | Action |
 |---|---|---|
-| `<PageDown>` / `<PageUp>` | any pane | next / previous changed file |
-| `]f` / `[f` | any pane | same, alternate binding |
-| `<S-PageDown>` / `<S-PageUp>` | any pane | next / previous stream of work |
-| `]F` / `[F` | any pane | same, alternate binding |
+| `m` / `n` | any pane | next / previous changed file |
+| `<PageDown>` / `<PageUp>` | any pane | same, alternate binding |
+| `M` / `N` | any pane | next / previous stream of work |
+| `<S-PageDown>` / `<S-PageUp>` | any pane | same, alternate binding |
 | `<End>` | any pane | toggle viewed — ticking advances to the next file |
 | `<leader>ge` | any pane | toggle the AI comments column |
 | `]c` / `[c` | diff panes | next / previous hunk (Vim built-in) |
 | `<CR>` | tree | open file, or fold a directory |
-| `m` | tree | toggle viewed |
+| `v` | tree | toggle viewed |
 | `q` | tree | close the session |
+
+All bindings are buffer-local to the session's panes and configurable through
+`keys`. Note that `m`/`n` shadow Vim's search-repeat inside those panes; rebind
+them (for example back to `]f`/`[f`) if that matters to you.
 
 Viewed ticks persist per branch, so a half-finished review resumes where you
 left it. Ticks are dropped for files that changed after you ticked them.
@@ -135,7 +139,7 @@ file tree. The picker comes and goes with the comments column — one
 all files:
 
 ```
-│ ✦ STREAMS                            │
+│ 󰙴 STREAMS                            │
 │ ● All files                          │
 │   Cross-editor IMG. N allocation     │
 │     0/4 viewed  ·  +435 −0           │
@@ -143,7 +147,7 @@ all files:
 │     2/3 viewed  ·  +118 −6           │
 ```
 
-Both AI panes — the picker and the comments column — carry a `✦` header, so
+Both AI panes — the picker and the comments column — carry a `󰙴` header, so
 generated content is labelled at a glance.
 
 `<CR>` on a stream narrows the file tree — and paging, and the viewed-advance —

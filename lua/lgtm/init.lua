@@ -134,15 +134,21 @@ local defaults = {
     keys = {
         next_file = "<PageDown>",
         prev_file = "<PageUp>",
-        next_file_alt = "]f",
-        prev_file_alt = "[f",
+        -- m/n rather than ]f/[f: adjacent home-row-adjacent keys, m to the right
+        -- for forward, n to the left for back, so flicking through a review is a
+        -- single finger. Buffer-local to the session's panes — but they do
+        -- shadow Vim's search-repeat inside them. Restore with
+        -- keys = { next_file_alt = "]f", ... } if search-repeat matters more.
+        next_file_alt = "m",
+        prev_file_alt = "n",
         next_feature = "<S-PageDown>",
         prev_feature = "<S-PageUp>",
-        next_feature_alt = "]F",
-        prev_feature_alt = "[F",
+        next_feature_alt = "M",
+        prev_feature_alt = "N",
         toggle_viewed = "<End>",
         toggle_explain = "<leader>ge",
-        tree_toggle_viewed = "m",
+        -- Not "m", which is next-file everywhere now.
+        tree_toggle_viewed = "v",
         tree_open = "<CR>",
         tree_fold = "za",
         close = "<leader>gD",
@@ -287,7 +293,9 @@ local function open_feature_picker()
     vim.wo[win].colorcolumn = ""
     -- The pane's content is AI-generated; the ✦ header says so at a glance, the
     -- same mark the explanation column carries.
-    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# ✦ %#LgtmWinbarAI#STREAMS"
+    -- Nerd-font md-creation, the triple sparkle. A nerd font is already assumed
+    -- by the devicons in the tree.
+    vim.wo[win].winbar = "%#LgtmWinbarAIIcon# 󰙴 %#LgtmWinbarAI#STREAMS"
     vim.api.nvim_set_current_win(prev)
 
     -- The session's paging and toggle keys, plus the picker's own selection.
